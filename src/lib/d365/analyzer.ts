@@ -1,5 +1,6 @@
 import { componentTypeName } from "./componentTypes";
-import type { Finding, ParsedSolution } from "./types";
+import { resolveReferences } from "./dependencies";
+import type { Finding, ParsedSolution, Severity } from "./types";
 import { compareVersions, parseVersion } from "./version";
 
 export interface AnalyzeContext {
@@ -166,6 +167,9 @@ export function analyzeSolution(sol: ParsedSolution, ctx: AnalyzeContext = {}): 
   }
 
   f.push(...schemaRules(sol, others));
+  f.push(...dependencyRules(sol, others));
+  f.push(...navigationRules(sol));
+  f.push(...flowRules(sol));
   return f;
 }
 
@@ -250,6 +254,113 @@ function schemaRules(sol: ParsedSolution, others: ParsedSolution[]): Finding[] {
     }
   }
   return f;
+}
+
+const DEP_RULE: Record<number, { id: string; title: string; severity: Severity }> = {
+  1: { id: "DEP101", title: "Missing table", severity: "error" },
+  2: { id: "DEP102", title: "Missing column", severity: "error" },
+  61: { id: "DEP103", title: "Missing web resource", severity: "error" },
+  80: { id: "DEP104", title: "Missing model-driven app", severity: "error" },
+  29: { id: "DEP105", title: "Missing child flow", severity: "error" },
+  9001: { id: "DEP106", title: "Missing connection reference", severity: "warning" },
+  380: { id: "DEP107", title: "Missing environment variable definition", severity: "warning" },
+};
+const NAV_RULE: Record<number, { id: string; title: string }> = {
+  1: { id: "NAV001", title: "Navigation points to a missing table" },
+  61: { id: "NAV002", title: "Navigation uses a missing web resource" },
+};
+const NOT_DEP = new Set(["role-table", "lookup-target", "column-table"]); // covered by SEC001 / REL001
+
+/**
+ * Reference-graph based missing-dependency detection. Only components we are confident are required and absent
+ * (custom tables/columns, web resources, flows, apps, env vars, connection references) are reported as problems;
+ * GUID-addressed views/forms/roles that might be system components are summarised as "verify in target".
+ */
+function dependencyRules(sol: ParsedSolution, others: ParsedSolution[]): Finding[] {
+  const out: Finding[] = [];
+  const resolved = resolveReferences(sol, others).filter((r) => !NOT_DEP.has(r.ref.kind));
+  const group = new Map<string, typeof resolved>();
+  for (const r of resolved.filter((x) => x.status === "missing")) {
+    const k = `${r.ref.to.type}:${r.ref.to.key.toLowerCase()}`;
+    (group.get(k) ?? group.set(k, []).get(k)!).push(r);
+  }
+  for (let rs of group.values()) {
+    // the catch-all "$webresource:" scan duplicates specific owners; keep it only when nothing more specific exists
+    if (rs.some((r) => r.ref.kind !== "webresource-ref")) rs = rs.filter((r) => r.ref.kind !== "webresource-ref");
+    const to = rs[0].ref.to;
+    const navOnly = rs.every((r) => r.ref.kind.startsWith("nav-"));
+    const base = DEP_RULE[to.type] ?? { id: "DEP199", title: "Missing component", severity: "error" as Severity };
+    const nav = navOnly ? NAV_RULE[to.type] : undefined;
+    const who = [...new Set(rs.map((r) => `${componentTypeName(r.ref.from.type)} ${r.ref.from.name || r.ref.from.key}${r.ref.detail ? ` (${r.ref.detail})` : ""}`))];
+    out.push({
+      ruleId: nav?.id ?? base.id, severity: base.severity, title: nav?.title ?? base.title,
+      detail: `${componentTypeName(to.type)} "${to.key}" is required by ${who.slice(0, 4).join("; ")}${who.length > 4 ? `; +${who.length - 4} more` : ""}, but it is not in this solution or any loaded solution.`,
+      remediation: to.type === 9001 || to.type === 380
+        ? "Include it in the solution (Add existing), or make sure it exists in the target before import; supply values with a deployment settings file."
+        : "Add the component to this solution (Add required objects), or import the solution that provides it first. A missing dependency blocks import of managed solutions.",
+      componentKey: to.key,
+    });
+  }
+  const unverifiable = resolved.filter((r) => r.status === "unverifiable");
+  if (unverifiable.length) {
+    const byType = new Map<number, number>();
+    for (const r of unverifiable) byType.set(r.ref.to.type, (byType.get(r.ref.to.type) ?? 0) + 1);
+    out.push({ ruleId: "DEP108", severity: "info", title: "References to components outside the package",
+      detail: `${unverifiable.length} reference(s) point at components not in the package and cannot be verified offline: ${[...byType].map(([t, n]) => `${n} ${componentTypeName(t)}`).join(", ")}. They may be system components.`,
+      remediation: "Check the Dependencies tab, and confirm these exist in the target environment (or add them to the solution)." });
+  }
+  return out;
+}
+
+function navigationRules(sol: ParsedSolution): Finding[] {
+  const out: Finding[] = [];
+  const roles = sol.roles ?? [];
+  for (const sm of sol.siteMaps ?? []) {
+    const ids = new Map<string, number>();
+    const bump = (id: string) => id && ids.set(id, (ids.get(id) ?? 0) + 1);
+    for (const a of sm.areas) {
+      bump(a.id);
+      if (!a.groups.some((g) => g.subAreas.length)) {
+        out.push({ ruleId: "NAV006", severity: "warning", title: "Empty navigation area", detail: `Area "${a.title}" in "${sm.name}" has no sub areas and will show nothing.`, componentKey: a.id });
+      }
+      for (const g of a.groups) {
+        bump(g.id);
+        for (const s of g.subAreas) {
+          bump(s.id);
+          if (!s.entity && !s.url && !s.dashboard) {
+            out.push({ ruleId: "NAV007", severity: "warning", title: "Sub area has no target", detail: `"${a.title} › ${g.title} › ${s.title}" has no Entity, Url or DefaultDashboard.`, componentKey: s.id });
+          }
+          if (s.entity && roles.length && !roles.some((r) => r.privileges[s.entity!]?.read)) {
+            out.push({ ruleId: "NAV004", severity: "info", title: "No role in this solution can read a navigation table",
+              detail: `"${a.title} › ${g.title} › ${s.title}" opens ${s.entity}, but none of the ${roles.length} role(s) in this solution grant Read on it - users without another role will not see the item.`,
+              remediation: "Grant Read on the table in a deployed security role, or confirm existing roles in the target cover it.", componentKey: s.id });
+          }
+        }
+      }
+    }
+    for (const [id, n] of ids) {
+      if (n > 1) out.push({ ruleId: "NAV003", severity: "error", title: "Duplicate navigation Id", detail: `Id "${id}" is used ${n} times in site map "${sm.name}". Area, Group and SubArea Ids must be unique.`, componentKey: id });
+    }
+  }
+  for (const app of sol.apps ?? []) {
+    if (!app.components.some((c) => c.type === 62)) {
+      out.push({ ruleId: "NAV005", severity: "warning", title: "App has no site map", detail: `Model-driven app "${app.name}" does not include a site map component, so it will show no navigation after import.`, componentKey: app.uniqueName });
+    }
+  }
+  return out;
+}
+
+function flowRules(sol: ParsedSolution): Finding[] {
+  const out: Finding[] = [];
+  for (const fl of sol.flows ?? []) {
+    if (!fl.nodes.some((n) => n.kind === "trigger")) {
+      out.push({ ruleId: "FLOW001", severity: "warning", title: "Flow has no trigger", detail: `Flow "${fl.name}" has no trigger and can only be started as a child flow.`, componentKey: fl.id });
+    }
+    if (fl.stateCode === 0) {
+      out.push({ ruleId: "FLOW002", severity: "info", title: "Flow is turned off", detail: `Flow "${fl.name}" is in the Draft/Off state; it will be imported off and must be turned on in the target.`, remediation: "Turn flows on after import (or via your pipeline) once connection references are set.", componentKey: fl.id });
+    }
+  }
+  return out;
 }
 
 const cmp = (a: ParsedSolution, b: ParsedSolution) => {

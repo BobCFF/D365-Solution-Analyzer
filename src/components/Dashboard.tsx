@@ -1,15 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { SolutionComparison } from "@/lib/d365/compare";
+import type { ImportPlan } from "@/lib/d365/dependencies";
 import { parseSolutionZip } from "@/lib/d365/parser";
 import type { ParsedSolution } from "@/lib/d365/types";
 import { APP_VERSION } from "@/lib/version";
 import { Confirm, ThemeCycle, Toast } from "./ui";
-import { AnalysisView, CompareView, DictionaryView, LogView, SecurityView, SolutionPicker, SolutionsView, type FindingRow, type LogRow, type SolutionRow } from "./views";
+import { CompareApp } from "./CompareApp";
+import { DependenciesView, FlowsView, NavigationView, type DepsPayload } from "./insights";
+import { AnalysisView, DictionaryView, LogView, SecurityView, SolutionPicker, SolutionsView, type FindingRow, type LogRow, type SolutionRow } from "./views";
 
-type Tab = "solutions" | "analysis" | "dictionary" | "security" | "compare" | "log";
-const TABS: [Tab, string][] = [["solutions", "Solutions"], ["analysis", "Analysis"], ["dictionary", "Data Dictionary"], ["security", "Security"], ["compare", "Compare"], ["log", "Change log"]];
+type Tab = "solutions" | "analysis" | "deps" | "navigation" | "flows" | "dictionary" | "security" | "compare" | "log";
+const TABS: [Tab, string][] = [["solutions", "Solutions"], ["analysis", "Analysis"], ["deps", "Dependencies"], ["navigation", "Navigation"], ["flows", "Flows"], ["dictionary", "Data Dictionary"], ["security", "Security"], ["compare", "Compare"], ["log", "Change log"]];
 
 const sha256 = async (buf: ArrayBuffer) =>
   [...new Uint8Array(await crypto.subtle.digest("SHA-256", buf))].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -20,7 +22,8 @@ export function Dashboard({ token, email, onSignOut }: { token: string; email: s
   const [selected, setSelected] = useState<string | null>(null);
   const [parsed, setParsed] = useState<ParsedSolution | null>(null);
   const [findings, setFindings] = useState<FindingRow[]>([]);
-  const [diff, setDiff] = useState<SolutionComparison | null>(null);
+  const [deps, setDeps] = useState<DepsPayload | null>(null);
+  const [plan, setPlan] = useState<ImportPlan | null>(null);
   const [log, setLog] = useState<LogRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -82,12 +85,22 @@ export function Dashboard({ token, email, onSignOut }: { token: string; email: s
     if (selected === s.id) { setSelected(null); setParsed(null); setFindings([]); }
     setConfirmDel(null); await refresh(); setToast("Solution deleted");
   });
-  const compare = (leftId: string, rightId: string) => run(async () => {
-    setDiff((await api("/api/compare", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ leftId, rightId }) })).result);
-    await refresh();
-  });
+  const loadParsed = useCallback(async (id: string) => (await api(`/api/solutions/${id}`)).solution.parsed as ParsedSolution, [api]);
+  const logCompare = useCallback((leftId: string, rightId: string) => {
+    api("/api/compare", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ leftId, rightId }) }).then(refresh).catch(() => {});
+  }, [api, refresh]);
 
-  const needsSelection = (tab === "analysis" || tab === "dictionary" || tab === "security");
+  // Dependency data depends on everything loaded, so refetch when the selection or the loaded set changes.
+  useEffect(() => {
+    if (!selected || !(tab === "deps" || tab === "navigation" || tab === "flows")) return;
+    let live = true;
+    setDeps(null);
+    api(`/api/solutions/${selected}/dependencies`).then((d) => live && setDeps(d)).catch((e) => live && setError((e as Error).message));
+    if (tab === "deps") api("/api/import-plan").then((p) => live && setPlan(p)).catch(() => {});
+    return () => { live = false; };
+  }, [api, selected, tab, solutions.length]);
+
+  const needsSelection = (tab === "analysis" || tab === "deps" || tab === "navigation" || tab === "flows" || tab === "dictionary" || tab === "security");
 
   return (
     <div onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)}
@@ -103,7 +116,7 @@ export function Dashboard({ token, email, onSignOut }: { token: string; email: s
         </div>
       </header>
 
-      <main className="page">
+      <main className={`page${tab === "compare" ? " wide" : ""}`}>
         {error && <div className="panel err" role="alert">{error}</div>}
 
         {tab === "solutions" && (<>
@@ -125,9 +138,12 @@ export function Dashboard({ token, email, onSignOut }: { token: string; email: s
         )}
         {needsSelection && !parsed && <div className="panel empty">Load or choose a solution to see this view.</div>}
         {tab === "analysis" && parsed && <AnalysisView findings={findings} onRerun={rerun} busy={busy} />}
+        {tab === "deps" && parsed && <DependenciesView sol={parsed} deps={deps} plan={plan} />}
+        {tab === "navigation" && parsed && <NavigationView sol={parsed} deps={deps} />}
+        {tab === "flows" && parsed && <FlowsView key={selected} sol={parsed} deps={deps} />}
         {tab === "dictionary" && parsed && <DictionaryView sol={parsed} />}
         {tab === "security" && parsed && <SecurityView key={selected} sol={parsed} />}
-        {tab === "compare" && <CompareView solutions={solutions} onCompare={compare} result={diff} busy={busy} />}
+        {tab === "compare" && <CompareApp solutions={solutions} load={loadParsed} onLogged={logCompare} />}
         {tab === "log" && <LogView log={log} version={APP_VERSION} />}
         <p className="faint" style={{ marginTop: 24 }}>D365 Solution Analyzer v{APP_VERSION} · not affiliated with or endorsed by Microsoft</p>
       </main>

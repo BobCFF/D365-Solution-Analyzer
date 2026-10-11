@@ -19,7 +19,7 @@ export function validateParsed(input: unknown): ParsedSolution {
     const v = s![k];
     if (!Array.isArray(v) || v.length > MAX_ITEMS) bad(k);
   }
-  for (const k of ["entities", "relationships", "roles", "fieldProfiles"] as const) {
+  for (const k of ["entities", "relationships", "roles", "fieldProfiles", "siteMaps", "apps", "flows", "references"] as const) {
     const v = s![k];
     if (v !== undefined && (!Array.isArray(v) || v.length > MAX_ITEMS)) bad(k);
   }
