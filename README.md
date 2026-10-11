@@ -3,7 +3,7 @@
 Upload Dynamics 365 / Dataverse solutions and patches (`.zip`), analyze them for import/deployment problems (missing dependencies, patch version errors, publisher issues, layering overlaps), and compare two solutions. Next.js on Vercel + Supabase (Postgres, Auth, RLS).
 
 ```
-cp .env.example .env.local   # add Supabase URL + anon key + DATA_ENCRYPTION_KEY (see docs/SECURITY.md)
+cp .env.example .env.local   # add the D365_SolAna_* settings (see .env.example and docs/SECURITY.md)
 npm install && npm run dev
 npm test && npm run typecheck
 ```

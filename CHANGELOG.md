@@ -2,6 +2,10 @@
 
 All notable changes to this project are recorded here. Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/). The app version lives in `package.json` and is stamped on every in-app audit-log entry.
 
+## [0.5.1] - 2026-10-11
+### Added
+- **Prefixed configuration.** All settings can be provided as `D365_SolAna_SUPABASE_URL`, `D365_SolAna_SUPABASE_ANON_KEY`, `D365_SolAna_DATA_ENCRYPTION_KEY`, `D365_SolAna_DATA_ENCRYPTION_KEYS_PREVIOUS` and `D365_SolAna_ALLOWED_EMAILS` (the previous names still work as fallbacks; the prefixed name wins). The Supabase URL and anon key are inlined into the browser bundle at build time from `next.config.mjs`, so they no longer need a `NEXT_PUBLIC_` name. Useful when several apps share one Vercel team or Supabase integration variables already exist. Verified by building and loading the app with only prefixed variables.
+
 ## [0.5.0] - 2026-10-11
 Applies the findings of the D365 ERD Builder and Salesforce Analyzer reviews that fit this project; every finding ID is triaged in `docs/REVIEW-ADOPTION.md`.
 

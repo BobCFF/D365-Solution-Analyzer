@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getEnv } from "@/lib/server/config";
 import { envProblems } from "@/lib/server/env";
 import { withUser } from "@/lib/server/api";
 import { seal, unseal } from "@/lib/server/crypto";
@@ -17,5 +18,5 @@ export const GET = withUser(async (_req, ctx) => {
   }));
   let encryption = false;
   try { encryption = unseal(ctx.userId, "health", seal(ctx.userId, "health", "ok")) === "ok"; } catch { /* reported below */ }
-  return NextResponse.json({ version: APP_VERSION, encryption, tables, config: envProblems(), allowList: Boolean((process.env.ALLOWED_EMAILS ?? "").trim()) });
+  return NextResponse.json({ version: APP_VERSION, encryption, tables, config: envProblems(), allowList: Boolean((getEnv("ALLOWED_EMAILS") ?? "").trim()) });
 });
