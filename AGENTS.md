@@ -15,6 +15,9 @@ Goal: correct changes with minimal rework. Orient with `ARCHITECTURE.md`, then `
 - **Never store flow expressions or parameter values** (they can hold secrets). `flow.ts` keeps names, types, connectors, operation ids and safe literals only.
 - **Compare vocabulary** is source -> target: New (only in source), Deleted (only in target), Different, Identical (same as Salesforce Analyzer). Status dot uses shape + colour (`.di`).
 
+- **Storage is sealed.** Never write customer-derived text to Postgres, logs or error messages in plaintext. Go through `src/lib/store.ts` (`sealJson`/`unsealJson`, purpose strings are part of the AAD) and add any new column to the migration's `CHECK (... like 'enc:v1:%')` pattern. Keep only ids, timestamps and rule ids/severities in the clear. `tests/store.test.ts` asserts no plaintext reaches the DB; extend it for new tables. Never import `src/lib/server/*` from client code; never use a service-role key.
+- New API routes must start with `authenticate(req)` (JWT validation + allow-list + encryption check), validate ids (UUID), return `fail(e)` on errors, and call `logChange` when they mutate.
+
 ## Release checklist
 1. Code + tests (`npm test`, `npm run typecheck`, `npm run build`).
 2. Bump `package.json` version (single source; stamped on log entries and shown in the UI).

@@ -23,12 +23,14 @@ Requests carry the user's Supabase JWT (`Authorization: Bearer`); `clientForRequ
 | Compare: facets, status, deploy readiness; tree/filters | `comparison.ts`, `compareTree.ts` |
 | Legacy summary diff (server log) | `compare.ts` |
 | Payload validation | `validate.ts` |
-| DB access + audit log | `src/lib/store.ts`, `supabase.ts`, `supabase/migrations/` |
+| Encryption (AES-256-GCM, per-user keys), auth, error handling | `src/lib/server/{crypto,auth}.ts` |
+| DB access (sealed) + audit log | `src/lib/store.ts`, `supabase.ts`, `supabase/migrations/` |
+| CSP / headers | `src/middleware.ts`, `next.config.mjs` |
 | API | `src/app/api/{solutions,solutions/[id],compare,changelog}` |
 | UI | `src/components/{Dashboard,views,ui,CompareApp,FlowDiagram,insights}.tsx`, tokens in `src/app/globals.css` |
 
 ## Data model notes
-`solutions.parsed` holds the full `ParsedSolution` (entities, relationships, roles, field profiles, inventory). `solution_components` is a queryable flattening. Findings are recomputed (delete + insert) on every analysis because results depend on what else is loaded (parent solutions, dependencies).
+`solutions.parsed` and `solutions.meta` hold sealed (encrypted) JSON: the full `ParsedSolution` and the display metadata. Postgres cannot query inside them by design; the app decrypts per request. Findings are recomputed (delete + insert) on every analysis because results depend on what else is loaded (parent solutions, dependencies).
 
 ## Borrowed from D365 ERD Builder
 Relationship categories (`relationshipCategory`), privilege parsing (`prvVerbEntity`, depth words/masks), field-permission masks, prefix-based grouping, and the UI conventions above.

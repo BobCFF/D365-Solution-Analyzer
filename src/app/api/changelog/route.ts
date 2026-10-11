@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
-import { clientForRequest } from "@/lib/supabase";
+import { authenticate, fail } from "@/lib/server/auth";
+import { readLog } from "@/lib/store";
 
 export async function GET(req: Request) {
-  const db = clientForRequest(req);
-  if (!db) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const { data, error } = await db.from("change_log").select("*").order("created_at", { ascending: false }).limit(200);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ entries: data });
+  const a = await authenticate(req);
+  if ("res" in a) return a.res;
+  try { return NextResponse.json({ entries: await readLog(a.ctx) }); } catch (e) { return fail(e); }
 }

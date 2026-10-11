@@ -30,6 +30,7 @@ export function Dashboard({ token, email, onSignOut }: { token: string; email: s
   const [toast, setToast] = useState("");
   const [over, setOver] = useState(false);
   const [confirmDel, setConfirmDel] = useState<SolutionRow | null>(null);
+  const [confirmPurge, setConfirmPurge] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const api = useCallback(async (path: string, init?: RequestInit) => {
@@ -84,6 +85,11 @@ export function Dashboard({ token, email, onSignOut }: { token: string; email: s
     await api(`/api/solutions/${s.id}`, { method: "DELETE" });
     if (selected === s.id) { setSelected(null); setParsed(null); setFindings([]); }
     setConfirmDel(null); await refresh(); setToast("Solution deleted");
+  });
+  const purge = () => run(async () => {
+    await api("/api/account", { method: "DELETE", headers: { "x-confirm": "delete-all-my-data" } });
+    setSelected(null); setParsed(null); setFindings([]); setDeps(null); setPlan(null); setConfirmPurge(false);
+    await refresh(); setToast("All your stored data was deleted");
   });
   const loadParsed = useCallback(async (id: string) => (await api(`/api/solutions/${id}`)).solution.parsed as ParsedSolution, [api]);
   const logCompare = useCallback((leftId: string, rightId: string) => {
@@ -144,13 +150,17 @@ export function Dashboard({ token, email, onSignOut }: { token: string; email: s
         {tab === "dictionary" && parsed && <DictionaryView sol={parsed} />}
         {tab === "security" && parsed && <SecurityView key={selected} sol={parsed} />}
         {tab === "compare" && <CompareApp solutions={solutions} load={loadParsed} onLogged={logCompare} />}
-        {tab === "log" && <LogView log={log} version={APP_VERSION} />}
+        {tab === "log" && <LogView log={log} version={APP_VERSION} onPurge={() => setConfirmPurge(true)} />}
         <p className="faint" style={{ marginTop: 24 }}>D365 Solution Analyzer v{APP_VERSION} · not affiliated with or endorsed by Microsoft</p>
       </main>
 
       {confirmDel && (
         <Confirm title="Delete solution?" confirmLabel="Delete" onCancel={() => setConfirmDel(null)} onConfirm={() => remove(confirmDel)}
           body={<>This removes <b>{confirmDel.unique_name} {confirmDel.version}</b> and its findings from your workspace. The original .zip is unaffected.</>} />
+      )}
+      {confirmPurge && (
+        <Confirm title="Delete all your data?" confirmLabel="Delete everything" onCancel={() => setConfirmPurge(false)} onConfirm={purge}
+          body={<>This permanently erases every loaded solution, finding, comparison and history entry in your workspace. Your original .zip files are not affected. This cannot be undone.</>} />
       )}
       {toast && <Toast message={toast} onDone={() => setToast("")} />}
     </div>

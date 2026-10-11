@@ -1,7 +1,7 @@
 # Deploying
 
 1. **Supabase**: create a project, apply `supabase/migrations/*.sql` (SQL editor or `supabase db push`), enable Email auth.
-2. **Vercel**: import the GitHub repo; set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
+2. **Vercel**: import the GitHub repo; set `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, **`DATA_ENCRYPTION_KEY`** (`echo "k1:$(openssl rand -base64 32)"`; mark as sensitive and back it up) and, for private deployments, `ALLOWED_EMAILS`. Follow `docs/SECURITY.md` for Supabase Auth settings (disable open sign-up, MFA).
 3. Uploads are unpacked in the browser and only parsed JSON (limit ~4 MB) is posted, so large .zip files are fine; see TODO for very large schemas.
 
 ## Microsoft-supported practices applied
