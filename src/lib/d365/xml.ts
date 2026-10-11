@@ -9,7 +9,6 @@ export const xml = new XMLParser({
   trimValues: true,
 });
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
 export const arr = (v: any): any[] => (v === undefined || v === null || v === "" ? [] : Array.isArray(v) ? v : [v]);
 export const text = (v: any): string => {
   if (v === undefined || v === null) return "";

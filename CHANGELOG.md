@@ -2,6 +2,30 @@
 
 All notable changes to this project are recorded here. Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/). The app version lives in `package.json` and is stamped on every in-app audit-log entry.
 
+## [0.5.0] - 2026-10-11
+Applies the findings of the D365 ERD Builder and Salesforce Analyzer reviews that fit this project; every finding ID is triaged in `docs/REVIEW-ADOPTION.md`.
+
+### Security
+- Zod-validated, size-bounded upload payload (deep schema, unknown keys dropped), so the server-side analyzer can never be crashed or fed junk by a crafted request.
+- Abuse limits: durable hourly limits on upload/analyze/compare, per-instance limits on heavy reads, a 200-solution quota.
+- `apiGuard` middleware: cross-site `Origin` and non-JSON bodies refused on API writes.
+- JWT verified locally with `getClaims()` (no auth round trip per request).
+- One safe `{ error, code }` response shape; structured, scrubbed JSON logging; failures never leak internals.
+- A solution that cannot be decrypted (rotated or wrong key) no longer breaks the app: it is counted, hidden and explained.
+- Dependabot, `engines`/`.nvmrc`.
+
+### Added
+- **Status panel** (Change log tab, `GET /api/health`): configuration problems, whether the migration is applied, encryption self-test, access mode. Startup logs the same problems.
+- **Download my data** (`GET /api/account/export`) next to Delete all my data.
+- `/privacy` and `/terms` pages (drafts for the operator to finalize), MIT `LICENSE`, Open Graph metadata (`noindex`).
+- ESLint (Next, react-hooks, jsx-a11y) in `npm run lint` / `npm run check` and CI; 15 new tests (guard, validation, limiter, logging, env, storage).
+
+### Changed (accessibility, UX)
+- Native `<dialog>` for confirmations (focus trap, Esc, focus return); `<nav>` with `aria-current`; `aria-pressed` on toggle groups.
+- Login is a proper labelled form with autocomplete, forgot-password and set-new-password flow.
+- Contrast: 3:1 control borders and `--on-status` text on status fills in all five themes; 11px minimum text; reduced-motion support; visible focus outline.
+- Signed-in email shown beside Sign out.
+
 ## [0.4.0] - 2026-10-12
 ### Security
 - **Encrypted storage.** All content-bearing data (solution metadata, parsed model, findings, comparison results, audit log) is sealed with AES-256-GCM in the application before it reaches Supabase, using per-user keys derived with HKDF and bound to the user and column via AAD. The database only ever holds ciphertext; `CHECK` constraints reject plaintext. Duplicate detection uses per-user HMACs instead of names or file hashes. The app fails closed if `DATA_ENCRYPTION_KEY` is not set. Key rotation supported via `DATA_ENCRYPTION_KEYS_PREVIOUS`.

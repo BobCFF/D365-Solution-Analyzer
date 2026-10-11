@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ApiError, errMsg, makeApi } from "@/lib/api-client";
 import type { ImportPlan } from "@/lib/d365/dependencies";
 import { parseSolutionZip } from "@/lib/d365/parser";
 import type { ParsedSolution } from "@/lib/d365/types";
@@ -19,10 +20,11 @@ const sha256 = async (buf: ArrayBuffer) =>
 export function Dashboard({ token, email, onSignOut }: { token: string; email: string; onSignOut: () => void }) {
   const [tab, setTab] = useState<Tab>("solutions");
   const [solutions, setSolutions] = useState<SolutionRow[]>([]);
+  const [unreadable, setUnreadable] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
   const [parsed, setParsed] = useState<ParsedSolution | null>(null);
   const [findings, setFindings] = useState<FindingRow[]>([]);
-  const [deps, setDeps] = useState<DepsPayload | null>(null);
+  const [depsState, setDepsState] = useState<{ id: string; data: DepsPayload } | null>(null);
   const [plan, setPlan] = useState<ImportPlan | null>(null);
   const [log, setLog] = useState<LogRow[]>([]);
   const [busy, setBusy] = useState(false);
@@ -33,28 +35,30 @@ export function Dashboard({ token, email, onSignOut }: { token: string; email: s
   const [confirmPurge, setConfirmPurge] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
-  const api = useCallback(async (path: string, init?: RequestInit) => {
-    const res = await fetch(path, { ...init, headers: { ...(init?.headers ?? {}), Authorization: `Bearer ${token}` } });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(body.error ?? res.statusText);
-    return body;
-  }, [token]);
+  const api = useMemo(() => makeApi(token), [token]);
 
   const refresh = useCallback(async () => {
     try {
-      setSolutions((await api("/api/solutions")).solutions);
-      setLog((await api("/api/changelog")).entries);
-    } catch (e) { setError((e as Error).message); }
+      const r = await api<{ solutions: SolutionRow[]; unreadable: number }>("/api/solutions");
+      setSolutions(r.solutions); setUnreadable(r.unreadable);
+      setLog((await api<{ entries: LogRow[] }>("/api/changelog")).entries);
+    } catch (e) { setError(errMsg(e)); }
   }, [api]);
-  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => {
+    let live = true;
+    Promise.all([api<{ solutions: SolutionRow[]; unreadable: number }>("/api/solutions"), api<{ entries: LogRow[] }>("/api/changelog")])
+      .then(([r, l]) => { if (live) { setSolutions(r.solutions); setUnreadable(r.unreadable); setLog(l.entries); } })
+      .catch((e) => { if (live) setError(errMsg(e)); });
+    return () => { live = false; };
+  }, [api]);
 
   const run = async (fn: () => Promise<void>) => {
     setBusy(true); setError("");
-    try { await fn(); } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+    try { await fn(); } catch (e) { setError(e instanceof ApiError ? e.message : errMsg(e)); } finally { setBusy(false); }
   };
 
   const open = useCallback(async (id: string, goTo?: Tab) => {
-    const { solution, findings } = await api(`/api/solutions/${id}`);
+    const { solution, findings } = await api<{ solution: { parsed: ParsedSolution }; findings: FindingRow[] }>(`/api/solutions/${id}`);
     setSelected(id); setParsed(solution.parsed); setFindings(findings);
     if (goTo) setTab(goTo);
   }, [api]);
@@ -65,10 +69,7 @@ export function Dashboard({ token, email, onSignOut }: { token: string; email: s
       if (!file.name.toLowerCase().endsWith(".zip")) throw new Error(`${file.name}: upload the solution .zip (not the extracted XML).`);
       const buf = await file.arrayBuffer();
       const model = await parseSolutionZip(new Uint8Array(buf)); // unpacked in the browser; the .zip itself is never uploaded
-      const { id } = await api("/api/solutions", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fileName: file.name, fileSha256: await sha256(buf), parsed: model }),
-      });
+      const { id } = await api<{ id: string }>("/api/solutions", { method: "POST", json: { fileName: file.name, fileSha256: await sha256(buf), parsed: model } });
       last = id;
       setToast(`Loaded ${model.uniqueName} ${model.version}`);
     }
@@ -88,24 +89,25 @@ export function Dashboard({ token, email, onSignOut }: { token: string; email: s
   });
   const purge = () => run(async () => {
     await api("/api/account", { method: "DELETE", headers: { "x-confirm": "delete-all-my-data" } });
-    setSelected(null); setParsed(null); setFindings([]); setDeps(null); setPlan(null); setConfirmPurge(false);
+    setSelected(null); setParsed(null); setFindings([]); setDepsState(null); setPlan(null); setConfirmPurge(false);
     await refresh(); setToast("All your stored data was deleted");
   });
-  const loadParsed = useCallback(async (id: string) => (await api(`/api/solutions/${id}`)).solution.parsed as ParsedSolution, [api]);
+  const loadParsed = useCallback(async (id: string) => (await api<{ solution: { parsed: ParsedSolution } }>(`/api/solutions/${id}`)).solution.parsed, [api]);
   const logCompare = useCallback((leftId: string, rightId: string) => {
-    api("/api/compare", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ leftId, rightId }) }).then(refresh).catch(() => {});
+    api("/api/compare", { method: "POST", json: { leftId, rightId } }).then(refresh).catch(() => {});
   }, [api, refresh]);
 
   // Dependency data depends on everything loaded, so refetch when the selection or the loaded set changes.
   useEffect(() => {
     if (!selected || !(tab === "deps" || tab === "navigation" || tab === "flows")) return;
     let live = true;
-    setDeps(null);
-    api(`/api/solutions/${selected}/dependencies`).then((d) => live && setDeps(d)).catch((e) => live && setError((e as Error).message));
-    if (tab === "deps") api("/api/import-plan").then((p) => live && setPlan(p)).catch(() => {});
+    api<DepsPayload>(`/api/solutions/${selected}/dependencies`).then((d) => live && setDepsState({ id: selected, data: d })).catch((e) => live && setError(errMsg(e)));
+    if (tab === "deps") api<ImportPlan>("/api/import-plan").then((p) => live && setPlan(p)).catch(() => {});
     return () => { live = false; };
   }, [api, selected, tab, solutions.length]);
 
+  // dependency data of the selected solution (stale data stays visible while a refresh is in flight)
+  const deps = depsState && depsState.id === selected ? depsState.data : null;
   const needsSelection = (tab === "analysis" || tab === "deps" || tab === "navigation" || tab === "flows" || tab === "dictionary" || tab === "security");
 
   return (
@@ -113,17 +115,19 @@ export function Dashboard({ token, email, onSignOut }: { token: string; email: s
       onDrop={(e) => { e.preventDefault(); setOver(false); if (e.dataTransfer.files.length) upload(e.dataTransfer.files); }}>
       <header id="topbar">
         <div className="brand"><span className="logo" aria-hidden="true">▦</span>D365 Solution Analyzer</div>
-        <nav className="tabs" role="tablist">
-          {TABS.map(([id, label]) => <button key={id} role="tab" aria-selected={tab === id} className={`tab${tab === id ? " on" : ""}`} onClick={() => setTab(id)}>{label}</button>)}
+        <nav className="tabs" aria-label="Sections">
+          {TABS.map(([id, label]) => <button key={id} aria-current={tab === id ? "page" : undefined} className={`tab${tab === id ? " on" : ""}`} onClick={() => setTab(id)}>{label}</button>)}
         </nav>
         <div className="top-actions">
           <ThemeCycle />
-          <button className="btn ghost sm" onClick={onSignOut} title={email}>Sign out</button>
+          <span className="theme-name" title="Signed in as">{email}</span>
+          <button className="btn ghost sm" onClick={onSignOut}>Sign out</button>
         </div>
       </header>
 
       <main className={`page${tab === "compare" ? " wide" : ""}`}>
         {error && <div className="panel err" role="alert">{error}</div>}
+        {unreadable > 0 && <div className="notice err" role="alert"><b>{unreadable} stored solution(s) cannot be decrypted</b> with the current encryption key and are hidden. If you rotated the key, add the old one to <code>DATA_ENCRYPTION_KEYS_PREVIOUS</code>; otherwise those rows are unrecoverable and can be erased with Delete all my data.</div>}
 
         {tab === "solutions" && (<>
           <div className={`ldrop${over ? " over" : ""}`} tabIndex={0} role="button" aria-label="Upload solution zip files"
@@ -150,8 +154,8 @@ export function Dashboard({ token, email, onSignOut }: { token: string; email: s
         {tab === "dictionary" && parsed && <DictionaryView sol={parsed} />}
         {tab === "security" && parsed && <SecurityView key={selected} sol={parsed} />}
         {tab === "compare" && <CompareApp solutions={solutions} load={loadParsed} onLogged={logCompare} />}
-        {tab === "log" && <LogView log={log} version={APP_VERSION} onPurge={() => setConfirmPurge(true)} />}
-        <p className="faint" style={{ marginTop: 24 }}>D365 Solution Analyzer v{APP_VERSION} · not affiliated with or endorsed by Microsoft</p>
+        {tab === "log" && <LogView log={log} version={APP_VERSION} api={api} onPurge={() => setConfirmPurge(true)} />}
+        <p className="faint" style={{ marginTop: 24 }}>D365 Solution Analyzer v{APP_VERSION} · not affiliated with or endorsed by Microsoft · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></p>
       </main>
 
       {confirmDel && (

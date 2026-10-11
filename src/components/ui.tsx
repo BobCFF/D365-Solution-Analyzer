@@ -1,25 +1,25 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
 
+/** Native <dialog>: focus is trapped, Esc closes, and focus returns to the opener (Salesforce Analyzer U2/EA1). */
 export function Confirm({ title, body, confirmLabel, onConfirm, onCancel }: {
   title: string; body: ReactNode; confirmLabel: string; onConfirm: () => void; onCancel: () => void;
 }) {
+  const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
-    const k = (e: KeyboardEvent) => e.key === "Escape" && onCancel();
-    window.addEventListener("keydown", k);
-    return () => window.removeEventListener("keydown", k);
-  }, [onCancel]);
+    const d = ref.current, opener = document.activeElement as HTMLElement | null;
+    d?.showModal();
+    return () => { d?.close(); opener?.focus?.(); };
+  }, []);
   return (
-    <div className="scrim" onClick={onCancel}>
-      <div className="modal" role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()}>
-        <h2>{title}</h2><div className="muted">{body}</div>
-        <div className="actions">
-          <button className="btn ghost" onClick={onCancel}>Cancel</button>
-          <button className="btn danger" autoFocus onClick={onConfirm}>{confirmLabel}</button>
-        </div>
+    <dialog ref={ref} className="modal" aria-labelledby="dlg-title" onCancel={(e) => { e.preventDefault(); onCancel(); }} onClick={(e) => e.target === ref.current && onCancel()}>
+      <h2 id="dlg-title">{title}</h2><div className="muted">{body}</div>
+      <div className="actions">
+        <button className="btn ghost" onClick={onCancel}>Cancel</button>
+        <button className="btn danger" autoFocus onClick={onConfirm}>{confirmLabel}</button>
       </div>
-    </div>
+    </dialog>
   );
 }
 
@@ -38,20 +38,25 @@ export function applyTheme(id: string) {
   const el = document.documentElement;
   if (id === "system") el.removeAttribute("data-theme"); else el.setAttribute("data-theme", id);
 }
-export function savedTheme(): string {
+function readTheme(): string {
   try { return localStorage.getItem(THEME_KEY) ?? "system"; } catch { return "system"; }
 }
+const themeListeners = new Set<() => void>();
+const subscribeTheme = (cb: () => void) => { themeListeners.add(cb); return () => { themeListeners.delete(cb); }; };
+
 export function ThemeCycle() {
-  const [id, setId] = useState("system");
-  useEffect(() => { const t = savedTheme(); setId(t); applyTheme(t); }, []);
+  // External store (localStorage + DOM attribute): no setState-in-effect, and no hydration mismatch.
+  const id = useSyncExternalStore(subscribeTheme, readTheme, () => "system");
+  useEffect(() => { applyTheme(id); }, [id]);
   const next = () => {
     const n = THEMES[(THEMES.findIndex((t) => t.id === id) + 1) % THEMES.length].id;
-    setId(n); applyTheme(n);
-    try { localStorage.setItem(THEME_KEY, n); } catch { /* storage unavailable */ }
+    try { localStorage.setItem(THEME_KEY, n); } catch { /* storage unavailable: theme still applies for this page view */ }
+    applyTheme(n);
+    themeListeners.forEach((cb) => cb());
   };
   return (<>
     <span className="theme-name" aria-hidden="true">{THEMES.find((t) => t.id === id)?.label}</span>
-    <button className="btn ghost sm" onClick={next} aria-label="Cycle theme">Theme</button>
+    <button className="btn ghost sm" onClick={next} aria-label={`Cycle theme (current: ${THEMES.find((t) => t.id === id)?.label})`}>Theme</button>
   </>);
 }
 

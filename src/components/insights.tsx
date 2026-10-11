@@ -36,7 +36,7 @@ export function DependenciesView({ sol, deps, plan }: { sol: ParsedSolution; dep
       <span className="chip ok">{c.other ?? 0} in other solutions</span><span className="chip ok">{c.internal ?? 0} satisfied here</span><span className="chip info">{c.platform ?? 0} platform</span>
     </div>
     <div className="toolbar">
-      <div className="seg">{(["problems", "missing", "unverifiable", "other", "all"] as const).map((f) => <button key={f} className={filter === f ? "on" : ""} onClick={() => setFilter(f)}>{f === "problems" ? "Needs attention" : f === "all" ? "All" : STATUS_TEXT[f]}</button>)}</div>
+      <div className="seg" role="group" aria-label="Status filter">{(["problems", "missing", "unverifiable", "other", "all"] as const).map((f) => <button key={f} aria-pressed={filter === f} className={filter === f ? "on" : ""} onClick={() => setFilter(f)}>{f === "problems" ? "Needs attention" : f === "all" ? "All" : STATUS_TEXT[f]}</button>)}</div>
       <input type="search" placeholder="Filter…" value={q} onChange={(e) => setQ(e.target.value)} /><span className="grow" />
       <button className="btn ghost" onClick={() => downloadCsv(`${sol.uniqueName}-dependencies.csv`, [["From type", "From", "Relation", "To type", "To", "Status", "Provided by", "Where"], ...rows.map((r) => [componentTypeName(r.ref.from.type), r.ref.from.name ?? r.ref.from.key, r.ref.kind, componentTypeName(r.ref.to.type), r.ref.to.key, STATUS_TEXT[r.status], r.providedBy ?? "", r.ref.detail ?? ""])])}>Export CSV</button>
     </div>

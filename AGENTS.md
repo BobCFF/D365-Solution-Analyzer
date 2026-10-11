@@ -16,10 +16,13 @@ Goal: correct changes with minimal rework. Orient with `ARCHITECTURE.md`, then `
 - **Compare vocabulary** is source -> target: New (only in source), Deleted (only in target), Different, Identical (same as Salesforce Analyzer). Status dot uses shape + colour (`.di`).
 
 - **Storage is sealed.** Never write customer-derived text to Postgres, logs or error messages in plaintext. Go through `src/lib/store.ts` (`sealJson`/`unsealJson`, purpose strings are part of the AAD) and add any new column to the migration's `CHECK (... like 'enc:v1:%')` pattern. Keep only ids, timestamps and rule ids/severities in the clear. `tests/store.test.ts` asserts no plaintext reaches the DB; extend it for new tables. Never import `src/lib/server/*` from client code; never use a service-role key.
-- New API routes must start with `authenticate(req)` (JWT validation + allow-list + encryption check), validate ids (UUID), return `fail(e)` on errors, and call `logChange` when they mutate.
+- **API routes** are `export const GET = withUser(async (req, ctx, params) => { ... })` (`src/lib/server/api.ts`): it authenticates (`getClaims`, allow-list, encryption check), turns thrown `HttpError`s into `{ error, code }` and everything else into a logged generic 500. Validate ids with `isUuid`, bodies with zod (see `validate.ts`), apply `auditLimit()` (mutations) or `memoryLimit()` (heavy reads), and call `logChange` when you mutate. Never return raw upstream/DB messages; log with `log.*` (no solution content).
+- **Browser calls** go through `makeApi(token)` (`src/lib/api-client.ts`); show `errMsg(e)`. Confirmations use the native-dialog `Confirm`, never `confirm()`.
+- **Accessibility bar (jsx-a11y + WCAG 2.2 AA):** `npm run lint` must be clean; toggle groups use `aria-pressed`, navigation uses `aria-current`, errors `role="alert"`, controls use `--field-line` borders (3:1), text on status fills uses `--on-status`, minimum 11px.
+- **Triage new review findings** in `docs/REVIEW-ADOPTION.md` (done / not applicable / open) so none are silently dropped.
 
 ## Release checklist
-1. Code + tests (`npm test`, `npm run typecheck`, `npm run build`).
+1. Code + tests (`npm run check` = typecheck + lint + tests, then `npm run build`).
 2. Bump `package.json` version (single source; stamped on log entries and shown in the UI).
 3. `CHANGELOG.md` entry (Keep a Changelog, SemVer) and tick items in `TODO.md`.
 4. Branch -> PR -> squash-merge to `main`; confirm Vercel "Ready".

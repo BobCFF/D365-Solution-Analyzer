@@ -2,6 +2,9 @@
 
 import { useMemo, useState } from "react";
 import type { AccessLevel, ParsedSolution } from "@/lib/d365/types";
+import { useEffect } from "react";
+import type { Api } from "@/lib/api-client";
+import { errMsg } from "@/lib/api-client";
 import { downloadCsv, SEV_ORDER } from "./ui";
 
 export interface SolutionRow { id: string; unique_name: string; friendly_name: string; version: string; managed: boolean; parent_solution_name: string | null; file_name: string; created_at: string }
@@ -51,7 +54,7 @@ export function AnalysisView({ findings, onRerun, busy }: { findings: FindingRow
         <span className="chip error">{counts.error} errors</span><span className="chip warning">{counts.warning} warnings</span><span className="chip info">{counts.info} info</span>
       </div>
       <span className="grow" />
-      <div className="seg">{(["all", "error", "warning", "info"] as const).map((v) => <button key={v} className={sev === v ? "on" : ""} onClick={() => setSev(v)}>{v}</button>)}</div>
+      <div className="seg" role="group" aria-label="Severity filter">{(["all", "error", "warning", "info"] as const).map((v) => <button key={v} aria-pressed={sev === v} className={sev === v ? "on" : ""} onClick={() => setSev(v)}>{v}</button>)}</div>
       <button className="btn ghost" disabled={busy} onClick={onRerun} title="Re-check against everything currently loaded (e.g. after loading a parent solution)">Re-run</button>
       <button className="btn ghost" disabled={!findings.length} onClick={() => downloadCsv("findings.csv", [["Rule", "Severity", "Title", "Detail", "Remediation"], ...findings.map((f) => [f.rule_id, f.severity, f.title, f.detail, f.remediation ?? ""])])}>Export CSV</button>
     </div>
@@ -142,14 +145,38 @@ export function SecurityView({ sol }: { sol: ParsedSolution }) {
   </div>);
 }
 
-export function LogView({ log, version, onPurge }: { log: LogRow[]; version: string; onPurge: () => void }) {
+interface Health { version: string; encryption: boolean; allowList: boolean; tables: { table: string; ok: boolean; hint?: string }[]; config: { level: "error" | "warn"; message: string }[] }
+
+export function LogView({ log, version, api, onPurge }: { log: LogRow[]; version: string; api: Api; onPurge: () => void }) {
+  const [health, setHealth] = useState<Health | null>(null);
+  const [msg, setMsg] = useState("");
+  useEffect(() => { api<Health>("/api/health").then(setHealth).catch((e) => setMsg(errMsg(e))); }, [api]);
+  const exportData = async () => {
+    try {
+      const data = await api("/api/account/export");
+      const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
+      const a = document.createElement("a"); a.href = url; a.download = "d365-solution-analyzer-export.json"; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) { setMsg(errMsg(e)); }
+  };
+  const problems = health ? [...health.config, ...health.tables.filter((t) => !t.ok).map((t) => ({ level: "error" as const, message: `Table "${t.table}" is missing. ${t.hint}` })), ...(health.encryption ? [] : [{ level: "error" as const, message: "Encryption self-test failed (check DATA_ENCRYPTION_KEY)." }])] : [];
   return (<div>
-    <p className="muted">Audit trail of actions in this workspace (stored encrypted). Project release notes are in CHANGELOG.md. Running v{version}.</p>
+    <div className="panel">
+      <h2>Status</h2>
+      {!health && !msg && <p className="muted">Checking…</p>}
+      {msg && <p className="err" role="alert">{msg}</p>}
+      {health && (<>
+        <p>{problems.some((p) => p.level === "error") ? <span className="chip error">Needs attention</span> : <span className="chip ok">Ready</span>} <span className="muted">v{version} · encryption {health.encryption ? "ok" : "failed"} · database {health.tables.every((t) => t.ok) ? "ok" : "incomplete"} · access {health.allowList ? "restricted to ALLOWED_EMAILS" : "any signed-in account"}</span></p>
+        {problems.length > 0 && <ul>{problems.map((p, i) => <li key={i} className={p.level === "error" ? "err" : "muted"}>{p.level === "error" ? "✗" : "⚠"} {p.message}</li>)}</ul>}
+      </>)}
+    </div>
     <div className="panel">
       <h2>Your data</h2>
-      <p className="muted">Solution metadata, findings, comparisons and this history are encrypted before storage and visible only to your account. You can erase all of it at any time.</p>
-      <button className="btn danger" onClick={onPurge}>Delete all my data…</button>
+      <p className="muted">Solution metadata, findings, comparisons and this history are encrypted before storage and visible only to your account. Download everything we hold, or erase it.</p>
+      <div className="row"><button className="btn ghost" onClick={exportData}>Download my data (JSON)</button><button className="btn danger" onClick={onPurge}>Delete all my data…</button></div>
     </div>
+    <h2>Activity</h2>
+    <p className="muted">Audit trail of actions in this workspace (stored encrypted). Project release notes are in CHANGELOG.md.</p>
     <div className="tablewrap"><table><thead><tr><th>When</th><th>Action</th><th>Summary</th><th>App</th></tr></thead>
       <tbody>{log.map((l) => <tr key={l.id}><td className="muted">{new Date(l.created_at).toLocaleString()}</td><td>{l.action}</td><td>{l.summary}</td><td className="muted">v{l.app_version}</td></tr>)}
         {!log.length && <tr><td colSpan={4} className="muted">No activity yet.</td></tr>}</tbody></table></div>

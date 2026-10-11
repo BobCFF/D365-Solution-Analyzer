@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { analyzeSelection, compareSets, STATUS_LABEL, type CompareRow, type Comparison, type DiffStatus } from "@/lib/d365/comparison";
 import { componentTypeName } from "@/lib/d365/componentTypes";
 import { buildTree, countByType, type Tab } from "@/lib/d365/compareTree";
@@ -47,7 +47,8 @@ export function CompareApp({ solutions, load, onLogged }: {
   const report = useMemo(() => (cmp && pair && ticked.size ? analyzeSelection([...ticked], pair.src, pair.tgt, cmp) : null), [cmp, pair, ticked]);
   const activeRow = active && cmp ? cmp.byId.get(active) ?? null : null;
 
-  useEffect(() => { if (activeRow && activeRow.type !== 29 && pane === "flow") setPane("summary"); }, [activeRow, pane]);
+  // the Diagram view only exists for flows: fall back to Summary for anything else
+  const paneShown: Pane = pane === "flow" && activeRow?.type !== 29 ? "summary" : pane;
 
   const toggle = (r: CompareRow) => setTicked((t) => {
     const n = new Set(t); const on = !n.has(r.id);
@@ -106,7 +107,7 @@ export function CompareApp({ solutions, load, onLogged }: {
         {!cmp && <div className="panel empty">Pick a source and a target, for example a new release against what is deployed, a patch against its parent, or dev against prod. Both must be loaded on the Solutions tab.</div>}
         {cmp && pair && (<>
           <div className="toolbar">
-            <div className="seg" role="tablist">{TABS.map(([id, label]) => <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? "on" : ""} onClick={() => setTab(id)}>{label} {id === "all" ? cmp.rows.length : cmp.counts[id]}</button>)}</div>
+            <div className="seg" role="group" aria-label="Difference filter">{TABS.map(([id, label]) => <button key={id} aria-pressed={tab === id} className={tab === id ? "on" : ""} onClick={() => setTab(id)}>{label} {id === "all" ? cmp.rows.length : cmp.counts[id]}</button>)}</div>
             <input type="search" placeholder="Filter…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Filter" />
             {(tab !== "all" || type !== null || q) && <button className="btn ghost sm" onClick={() => { setTab("all"); setType(null); setQ(""); }}>Clear filters</button>}
             <span className="grow" />
@@ -157,15 +158,15 @@ export function CompareApp({ solutions, load, onLogged }: {
               <div className="toolbar">
                 <b className="mono">{activeRow.name}</b><StatusDot s={activeRow.status} />
                 <span className="grow" />
-                <div className="seg" role="tablist">
-                  <button className={pane === "summary" ? "on" : ""} onClick={() => setPane("summary")}>Summary</button>
-                  <button className={pane === "deps" ? "on" : ""} onClick={() => setPane("deps")}>Dependencies</button>
-                  {activeRow.type === 29 && <button className={pane === "flow" ? "on" : ""} onClick={() => setPane("flow")}>Diagram</button>}
+                <div className="seg" role="group" aria-label="Detail view">
+                  <button aria-pressed={paneShown === "summary"} className={paneShown === "summary" ? "on" : ""} onClick={() => setPane("summary")}>Summary</button>
+                  <button aria-pressed={paneShown === "deps"} className={paneShown === "deps" ? "on" : ""} onClick={() => setPane("deps")}>Dependencies</button>
+                  {activeRow.type === 29 && <button aria-pressed={paneShown === "flow"} className={paneShown === "flow" ? "on" : ""} onClick={() => setPane("flow")}>Diagram</button>}
                 </div>
               </div>
-              {pane === "summary" && <SummaryPane row={activeRow} />}
-              {pane === "deps" && <DepsPane row={activeRow} pair={pair} cmp={cmp} ticked={ticked} onTick={(ids) => setTicked((t) => new Set([...t, ...ids]))} onOpen={setActive} />}
-              {pane === "flow" && <FlowPane row={activeRow} pair={pair} />}
+              {paneShown === "summary" && <SummaryPane row={activeRow} />}
+              {paneShown === "deps" && <DepsPane row={activeRow} pair={pair} cmp={cmp} ticked={ticked} onTick={(ids) => setTicked((t) => new Set([...t, ...ids]))} onOpen={setActive} />}
+              {paneShown === "flow" && <FlowPane row={activeRow} pair={pair} />}
             </div>
           )}
         </>)}

@@ -23,7 +23,10 @@ Requests carry the user's Supabase JWT (`Authorization: Bearer`); `clientForRequ
 | Compare: facets, status, deploy readiness; tree/filters | `comparison.ts`, `compareTree.ts` |
 | Legacy summary diff (server log) | `compare.ts` |
 | Payload validation | `validate.ts` |
-| Encryption (AES-256-GCM, per-user keys), auth, error handling | `src/lib/server/{crypto,auth}.ts` |
+| Encryption (AES-256-GCM, per-user keys) | `src/lib/server/crypto.ts` |
+| Auth, `withUser`, limits, error shape, logging, env checks | `src/lib/server/{auth,api,api-response,log,env}.ts`, `src/instrumentation.ts` |
+| Browser API client | `src/lib/api-client.ts` |
+| Public pages | `src/app/{privacy,terms}/page.tsx` |
 | DB access (sealed) + audit log | `src/lib/store.ts`, `supabase.ts`, `supabase/migrations/` |
 | CSP / headers | `src/middleware.ts`, `next.config.mjs` |
 | API | `src/app/api/{solutions,solutions/[id],compare,changelog}` |

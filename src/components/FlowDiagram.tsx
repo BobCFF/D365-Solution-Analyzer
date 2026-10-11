@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { diffFlows, edgeKey, layoutFlow, type FlowDiff, type NodeDiff } from "@/lib/d365/flowLayout";
 import type { FlowNode, ParsedFlow } from "@/lib/d365/types";
 
@@ -26,13 +26,13 @@ export function FlowDiagram({ flow, against }: { flow: ParsedFlow; against?: Par
   const drag = useRef<{ x: number; y: number; vx: number; vy: number } | null>(null);
   const svg = useRef<SVGSVGElement>(null);
 
-  const fit = () => {
+  const fit = useCallback(() => {
     const r = svg.current?.getBoundingClientRect();
     if (!r) return;
     const k = Math.min(1, r.width / layout.width, r.height / layout.height);
     setView({ k, x: (r.width - layout.width * k) / 2, y: 8 });
-  };
-  useEffect(() => { fit(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [layout]);
+  }, [layout]);
+  useEffect(() => { fit(); }, [fit]);
   useEffect(() => {
     const el = svg.current;
     if (!el) return;
