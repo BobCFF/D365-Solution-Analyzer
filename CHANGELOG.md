@@ -2,6 +2,20 @@
 
 All notable changes to this project are recorded here. Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/). The app version lives in `package.json` and is stamped on every in-app audit-log entry.
 
+## [0.4.0] - 2026-10-12
+### Security
+- **Encrypted storage.** All content-bearing data (solution metadata, parsed model, findings, comparison results, audit log) is sealed with AES-256-GCM in the application before it reaches Supabase, using per-user keys derived with HKDF and bound to the user and column via AAD. The database only ever holds ciphertext; `CHECK` constraints reject plaintext. Duplicate detection uses per-user HMACs instead of names or file hashes. The app fails closed if `DATA_ENCRYPTION_KEY` is not set. Key rotation supported via `DATA_ENCRYPTION_KEYS_PREVIOUS`.
+- Authentication hardening: JWT validated against Supabase Auth on each request, optional `ALLOWED_EMAILS` allow-list, generic error responses, `no-store` caching on APIs.
+- Database: tables recreated with `FORCE ROW LEVEL SECURITY`, `anon`/`public` grants revoked, immutable rows (no UPDATE policy), plaintext `solution_components` table removed.
+- Nonce-based Content-Security-Policy (middleware), HSTS, CORP, tightened headers.
+- **Delete all my data** (Change log tab, `DELETE /api/account`) for right to erasure.
+- Dependencies upgraded (Next.js 16, fast-xml-parser 5) to clear all `npm audit` findings.
+- New `docs/SECURITY.md`; `.env.example` documents the key; `PRIVACY.md` updated; CI runs `npm audit`.
+
+### Changed (breaking for stored data)
+- Migration `20261012000000_encrypted_storage.sql` replaces the plaintext tables. Rows from v0.1-v0.3 are dropped; re-upload packages after applying (nothing had been deployed).
+- API list/detail shapes are unchanged; `POST /api/solutions` returns the finding count instead of the findings array.
+
 ## [0.3.0] - 2026-10-11
 ### Added
 - **Missing-dependency engine** (`dependencies.ts`): builds a reference graph from site maps, model-driven apps, forms, web resources, flows, roles and schema, and resolves every edge against the solution, all other loaded solutions and the platform. Only clearly-custom absent components are flagged; GUID-addressed views/forms/roles are reported as "verify in target" to avoid false alarms. Rules `DEP101-DEP108`.

@@ -142,9 +142,14 @@ export function SecurityView({ sol }: { sol: ParsedSolution }) {
   </div>);
 }
 
-export function LogView({ log, version }: { log: LogRow[]; version: string }) {
+export function LogView({ log, version, onPurge }: { log: LogRow[]; version: string; onPurge: () => void }) {
   return (<div>
-    <p className="muted">Audit trail of actions in this workspace. Project release notes are in CHANGELOG.md. Running v{version}.</p>
+    <p className="muted">Audit trail of actions in this workspace (stored encrypted). Project release notes are in CHANGELOG.md. Running v{version}.</p>
+    <div className="panel">
+      <h2>Your data</h2>
+      <p className="muted">Solution metadata, findings, comparisons and this history are encrypted before storage and visible only to your account. You can erase all of it at any time.</p>
+      <button className="btn danger" onClick={onPurge}>Delete all my data…</button>
+    </div>
     <div className="tablewrap"><table><thead><tr><th>When</th><th>Action</th><th>Summary</th><th>App</th></tr></thead>
       <tbody>{log.map((l) => <tr key={l.id}><td className="muted">{new Date(l.created_at).toLocaleString()}</td><td>{l.action}</td><td>{l.summary}</td><td className="muted">v{l.app_version}</td></tr>)}
         {!log.length && <tr><td colSpan={4} className="muted">No activity yet.</td></tr>}</tbody></table></div>

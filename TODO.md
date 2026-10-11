@@ -7,7 +7,9 @@ Legend: P0 first, P1 important, P2 nice-to-have.
 - [ ] Validate parser/rules against several real exported solutions and patches (confirm patch XML markers).
 
 ## P1
-- [ ] Strict CSP (nonce) + HSTS check in production.
+- [ ] Bulk re-encryption job for key rotation (`needsRotation()` exists); optional envelope keys via KMS.
+- [ ] Rate limiting on API routes (needs shared store, e.g. Upstash).
+- [ ] Optional client-side passphrase mode (zero-knowledge: server cannot decrypt) - trade-off: server-side dependency checks need the key.
 - [ ] Rules: plug-in step/isolation mode, forms/views referencing missing columns, option set conflicts, managed-property (`IsCustomizable`) checks.
 - [ ] Insights tab (counts by publisher prefix, relationship categories, risk summary) like ERD Builder.
 - [ ] Payloads >4 MB: chunked upload or Storage-backed JSON.
@@ -21,9 +23,9 @@ Legend: P0 first, P1 important, P2 nice-to-have.
 - [ ] Group by publisher prefix with colors; relationship category filters.
 - [ ] Table-level security matrix compare across roles; XLSX export.
 - [ ] Accessibility pass (focus trap in dialogs, table semantics).
-- [ ] Rate limiting on API routes.
 
 ## Done
+- [x] 0.4.0 Encrypted storage, FORCE RLS + revoked grants, nonce CSP + HSTS, allow-list, erase-all-data, docs/SECURITY.md.
 - [x] 0.3.0 Missing-dependency engine, navigation analysis, flow visualizer + diff, Salesforce-Analyzer-style compare, import-order planner.
 - [x] 0.2.0 Client-side unpack, richer schema parsing, security/field rules, ERD-Builder-style UI, CI.
 - [x] 0.1.0 Parser, analyzer, compare, schema, API.

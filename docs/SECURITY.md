@@ -1,0 +1,31 @@
+# Security
+
+Solution files describe a customer's data model, security roles, integrations and navigation, so they are treated as confidential.
+
+## What is protected, and how
+| Threat | Control |
+|---|---|
+| Database access / backups / SQL logs expose customer metadata | **Application-level encryption** (AES-256-GCM) of every content-bearing value *before* it reaches Supabase: solution metadata, the parsed model, finding text, comparison results and the audit log. `CHECK (... like 'enc:v1:%')` constraints make storing plaintext in those columns impossible. |
+| One user reading another's data | Row-level security (owner only, `FORCE`d), no `anon`/`public` grants, and **per-user encryption keys** (HKDF from the master key, bound to the user id and column via AAD). Ciphertext copied to another user's row fails authentication. |
+| Raw solution files leaking | The `.zip` is unpacked in the browser and never uploaded; web resources, plug-in binaries and flow expressions/parameter values are not stored. Duplicate detection uses keyed hashes, not plain names or file hashes. |
+| Tampering with stored data | GCM authentication: modified ciphertext is rejected, never silently decrypted. |
+| Key compromise / rotation | Key ids in every envelope; `DATA_ENCRYPTION_KEYS_PREVIOUS` keeps old keys readable while `DATA_ENCRYPTION_KEY` encrypts new writes. The app **fails closed** (refuses to store) if no key is configured. |
+| Unauthorised accounts | JWT validated against Supabase Auth on every request; optional `ALLOWED_EMAILS` allow-list; disable public sign-up in Supabase for private deployments. |
+| XSS / data exfiltration from the page | Nonce-based CSP (no inline/eval/third-party scripts; `connect-src` limited to self + your Supabase), no framing, `nosniff`, no-referrer, HSTS, CORP/COOP. React escapes all rendered values; CSV exports neutralise spreadsheet formulas. |
+| Caching of decrypted responses | `Cache-Control: no-store` on all API routes. |
+| Error leakage | API errors are generic; details go to server logs only (never include customer data in logs). |
+| Right to erasure | Settings: **Change log > Delete all my data** (`DELETE /api/account`) removes every row the user owns. |
+
+## What is *not* encrypted (by design)
+Row ids, owner id, timestamps, finding rule id + severity (e.g. `DEP101`, `error`), audit action type, app version, and row counts. These identify no customer component.
+
+## Operating it safely
+1. Generate the key: `echo "k1:$(openssl rand -base64 32)"`; store it only in Vercel's encrypted env vars and your secrets manager. **Without it data cannot be decrypted.** Never commit it or paste it into chat.
+2. Use a dedicated Supabase project per trust boundary; enable MFA for dashboard users; keep the service-role key out of this app (it is never used; RLS is always enforced as the signed-in user).
+3. In Supabase Auth: disable "Allow new users to sign up" (or set `ALLOWED_EMAILS`), require email confirmation, enable leaked-password protection and MFA.
+4. Enable Supabase backups/PITR as usual: backups only contain ciphertext.
+5. Rotate: set a new `DATA_ENCRYPTION_KEY`, move the old value to `DATA_ENCRYPTION_KEYS_PREVIOUS`, redeploy. (Bulk re-encryption of old rows is on the TODO list; until then keep previous keys.)
+6. Keep dependencies patched (CI runs `npm audit`).
+
+## Reporting
+Please report vulnerabilities privately to the repository owner rather than in a public issue.

@@ -1,41 +1,41 @@
 import { NextResponse } from "next/server";
-import type { ParsedSolution } from "@/lib/d365/types";
-import { clientForRequest } from "@/lib/supabase";
-import { analyzeAndStore, logChange } from "@/lib/store";
+import { authenticate, fail } from "@/lib/server/auth";
+import { analyzeAndStore, deleteSolution, getSolution, logChange, readFindings } from "@/lib/store";
 
 type Ctx = { params: Promise<{ id: string }> };
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function GET(req: Request, { params }: Ctx) {
-  const db = clientForRequest(req);
-  if (!db) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const a = await authenticate(req);
+  if ("res" in a) return a.res;
   const { id } = await params;
-  const { data: solution, error } = await db.from("solutions").select("*").eq("id", id).maybeSingle();
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  if (!solution) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  const { data: findings } = await db.from("analysis_findings").select("*").eq("solution_id", id).order("id");
-  return NextResponse.json({ solution, findings: findings ?? [] });
+  if (!UUID.test(id)) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  try {
+    const s = await getSolution(a.ctx, id);
+    if (!s) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return NextResponse.json({ solution: { id: s.id, created_at: s.created_at, parsed: s.parsed }, findings: await readFindings(a.ctx, id) });
+  } catch (e) { return fail(e); }
 }
 
 /** Re-run analysis (e.g. after loading a parent solution). */
 export async function POST(req: Request, { params }: Ctx) {
-  const db = clientForRequest(req);
-  if (!db) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const a = await authenticate(req);
+  if ("res" in a) return a.res;
   const { id } = await params;
-  const { data, error } = await db.from("solutions").select("parsed").eq("id", id).maybeSingle();
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  if (!data) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  const findings = await analyzeAndStore(db, id, data.parsed as ParsedSolution);
-  await logChange(db, "analyze", "solution", id, `Re-analyzed; ${findings.length} finding(s)`);
-  return NextResponse.json({ findings });
+  if (!UUID.test(id)) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  try {
+    const s = await getSolution(a.ctx, id);
+    if (!s) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    const findings = await analyzeAndStore(a.ctx, id, s.parsed);
+    await logChange(a.ctx, "analyze", "solution", id, `Re-analyzed ${s.meta.uniqueName} ${s.meta.version}; ${findings.length} finding(s)`);
+    return NextResponse.json({ findings: findings.length });
+  } catch (e) { return fail(e); }
 }
 
 export async function DELETE(req: Request, { params }: Ctx) {
-  const db = clientForRequest(req);
-  if (!db) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const a = await authenticate(req);
+  if ("res" in a) return a.res;
   const { id } = await params;
-  const { data } = await db.from("solutions").select("unique_name, version").eq("id", id).maybeSingle();
-  const { error } = await db.from("solutions").delete().eq("id", id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  await logChange(db, "delete", "solution", id, `Deleted ${data?.unique_name ?? id} ${data?.version ?? ""}`.trim());
-  return NextResponse.json({ ok: true });
+  if (!UUID.test(id)) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  try { await deleteSolution(a.ctx, id); return NextResponse.json({ ok: true }); } catch (e) { return fail(e); }
 }
