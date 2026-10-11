@@ -90,6 +90,67 @@ export interface ParsedFieldProfile {
   permissions: FieldPermission[];
 }
 
+/** Pseudo component codes used internally (not Dataverse componenttype values). */
+export const CT_CONNECTION_REFERENCE = 9001;
+
+export interface SiteMapSubArea {
+  id: string;
+  title: string;
+  entity?: string;
+  url?: string;
+  icon?: string;
+  dashboard?: string;
+  privileges: { entity: string; privilege: string }[];
+}
+export interface ParsedSiteMap {
+  id: string;
+  name: string;
+  areas: { id: string; title: string; icon?: string; groups: { id: string; title: string; subAreas: SiteMapSubArea[] }[] }[];
+}
+export interface ParsedApp {
+  uniqueName: string;
+  name: string;
+  components: { type: number; key: string }[];
+  roles: string[];
+}
+
+export type FlowNodeKind = "trigger" | "connector" | "condition" | "switch" | "loop" | "scope" | "childflow" | "http" | "data" | "wait" | "end" | "action";
+export interface FlowNode {
+  id: string;
+  name: string;
+  /** raw Logic Apps action type, e.g. OpenApiConnection, If, Foreach */
+  type: string;
+  kind: FlowNodeKind;
+  /** enclosing container node id */
+  parent?: string;
+  /** branch inside the parent: "true" | "false" | case label | "default" */
+  branch?: string;
+  connector?: string;
+  operation?: string;
+  /** safe summary only (never expressions or parameter values) */
+  summary?: string;
+  runAfter: { from: string; states: string[] }[];
+}
+export interface ParsedFlow {
+  id: string;
+  name: string;
+  /** workflow category: 5 = cloud flow (modern flow) */
+  category: number;
+  stateCode: number;
+  nodes: FlowNode[];
+  connectionRefs: string[];
+  envVars: string[];
+  childFlows: string[];
+}
+
+/** A dependency edge extracted from solution content. */
+export interface Reference {
+  from: { type: number; key: string; name?: string };
+  kind: string;
+  to: { type: number; key: string };
+  detail?: string;
+}
+
 export interface ParsedSolution {
   uniqueName: string;
   friendlyName: string;
@@ -106,6 +167,11 @@ export interface ParsedSolution {
   relationships?: ParsedRelationship[];
   roles?: ParsedRole[];
   fieldProfiles?: ParsedFieldProfile[];
+  /** Added in 0.3.0 */
+  siteMaps?: ParsedSiteMap[];
+  apps?: ParsedApp[];
+  flows?: ParsedFlow[];
+  references?: Reference[];
   /** Files present in the package, for package-structure checks. */
   files: string[];
 }

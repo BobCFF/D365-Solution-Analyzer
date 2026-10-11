@@ -1,12 +1,19 @@
 import JSZip from "jszip";
-import { XMLParser } from "fast-xml-parser";
+import { arr, findAll, guid, text, xml } from "./xml";
+import { parseApps, parseSiteMaps, webResourceName } from "./navigation";
+import { parseFlowJson } from "./flow";
 import { componentTypeName } from "./componentTypes";
+import { CT_CONNECTION_REFERENCE } from "./types";
 import type {
   AccessLevel,
   EntityAttribute,
   FieldPermission,
   InventoryItem,
   ParsedEntity,
+  ParsedFlow,
+  ParsedApp,
+  ParsedSiteMap,
+  Reference,
   ParsedFieldProfile,
   ParsedRelationship,
   ParsedRole,
@@ -17,25 +24,9 @@ import type {
   RootComponent,
 } from "./types";
 
-const xml = new XMLParser({
-  ignoreAttributes: false,
-  attributeNamePrefix: "@_",
-  textNodeName: "#text",
-  parseTagValue: false,
-  parseAttributeValue: false,
-  trimValues: true,
-});
-
 export class SolutionParseError extends Error {}
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-const arr = (v: any): any[] => (v === undefined || v === null || v === "" ? [] : Array.isArray(v) ? v : [v]);
-const text = (v: any): string => {
-  if (v === undefined || v === null) return "";
-  if (typeof v === "object") return String(v["#text"] ?? "");
-  return String(v);
-};
-
 const MAX_UNCOMPRESSED_BYTES = 200 * 1024 * 1024;
 
 /**
@@ -64,7 +55,23 @@ export async function parseSolutionZip(data: Uint8Array | ArrayBuffer | Buffer):
 
   const parsed = parseSolutionXml(solutionXml);
   parsed.files = files;
-  if (customizationsXml) Object.assign(parsed, parseCustomizationsXml(customizationsXml));
+  if (customizationsXml) {
+    const { workflowMeta, ...model } = parseCustomizationsXml(customizationsXml);
+    Object.assign(parsed, model);
+    // Cloud flows live in Workflows/*.json next to customizations.xml; keep a safe summary model only.
+    const byFile = new Map(workflowMeta.map((w) => [w.file.toLowerCase().replace(/^\//, ""), w]));
+    const flows: ParsedFlow[] = [];
+    for (const f of files.filter((n) => /^workflows\/.+\.json$/i.test(n))) {
+      const meta = byFile.get(f.toLowerCase());
+      const idFromName = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.json$/i.exec(f)?.[1] ?? f;
+      const flow = parseFlowJson(await zip.files[f].async("string"), {
+        id: (meta?.id ?? idFromName).toLowerCase(), name: meta?.name ?? f.replace(/^Workflows\//i, "").replace(/\.json$/i, ""),
+        category: meta?.category ?? 5, stateCode: meta?.stateCode ?? -1,
+      });
+      if (flow) flows.push(flow);
+    }
+    parsed.flows = flows;
+  }
   return parsed;
 }
 
@@ -130,6 +137,11 @@ export interface CustomizationsModel {
   relationships: ParsedRelationship[];
   roles: ParsedRole[];
   fieldProfiles: ParsedFieldProfile[];
+  siteMaps: ParsedSiteMap[];
+  apps: ParsedApp[];
+  references: Reference[];
+  /** transient: used to link Workflows/*.json to their metadata, not stored */
+  workflowMeta: { id: string; name: string; category: number; stateCode: number; file: string }[];
 }
 
 /**
@@ -170,7 +182,7 @@ const truthy = (v: string) => /^(1|true|yes)$/i.test(v.trim());
 
 export function parseCustomizationsXml(content: string): CustomizationsModel {
   const root = xml.parse(content)?.ImportExportXml;
-  const empty: CustomizationsModel = { inventory: [], entities: [], relationships: [], roles: [], fieldProfiles: [] };
+  const empty: CustomizationsModel = { inventory: [], entities: [], relationships: [], roles: [], fieldProfiles: [], siteMaps: [], apps: [], references: [], workflowMeta: [] };
   if (!root) return empty;
   const items: InventoryItem[] = [];
   const add = (type: number, key: string, displayName?: string, details?: InventoryItem["details"]) => {
@@ -259,20 +271,53 @@ export function parseCustomizationsXml(content: string): CustomizationsModel {
   }
   fieldProfiles.sort((a, b) => a.name.localeCompare(b.name));
 
+  const workflowMeta: CustomizationsModel["workflowMeta"] = [];
   for (const w of arr(root.Workflows?.Workflow)) {
-    add(29, String(w["@_WorkflowId"] ?? w["@_Name"] ?? "").toLowerCase(), w["@_Name"], {
-      category: Number(text(w.Category) || -1),
-      stateCode: Number(text(w.StateCode) || -1),
-      primaryEntity: text(w.PrimaryEntity),
-    });
+    const id = guid(w["@_WorkflowId"] ?? w["@_Name"]);
+    const category = Number(text(w.Category) || -1), stateCode = Number(text(w.StateCode) || -1);
+    add(29, id, w["@_Name"], { category, stateCode, primaryEntity: text(w.PrimaryEntity) });
+    if (text(w.JsonFileName)) workflowMeta.push({ id, name: String(w["@_Name"] ?? id), category, stateCode, file: text(w.JsonFileName) });
   }
+  // GUID-addressed components that other components point at (forms, views, charts) and connection references.
+  const references: Reference[] = [];
+  for (const sf of findAll(root, "systemform")) {
+    const formId = guid(text(sf.formid));
+    if (!formId) continue;
+    const table = text(sf.objecttypecode).toLowerCase();
+    add(60, formId, text(sf.LocalizedNames?.LocalizedName?.["@_description"]) || text(sf.name) || formId, { table });
+    const from = { type: 60, key: formId, name: text(sf.name) || formId };
+    if (table && !/^\d+$/.test(table)) references.push({ from, kind: "form-table", to: { type: 1, key: table } });
+    for (const l of findAll(sf, "Library")) if (l["@_name"]) references.push({ from, kind: "form-webresource", to: { type: 61, key: webResourceName(String(l["@_name"])) } });
+    for (const h of findAll(sf, "Handler")) if (h["@_libraryName"]) references.push({ from, kind: "form-webresource", to: { type: 61, key: webResourceName(String(h["@_libraryName"])) } });
+    for (const c of findAll(sf, "control")) if (c["@_datafieldname"] && table && !/^\d+$/.test(table)) references.push({ from, kind: "form-column", to: { type: 2, key: `${table}.${String(c["@_datafieldname"]).toLowerCase()}` } });
+    for (const v of findAll(sf, "ViewId")) if (text(v)) references.push({ from, kind: "form-view", to: { type: 26, key: guid(text(v)) } });
+  }
+  for (const q of findAll(root, "savedquery")) {
+    const id = guid(text(q.savedqueryid));
+    if (id) add(26, id, text(q.LocalizedNames?.LocalizedName?.["@_description"]) || id, { table: text(q.returnedtypecode).toLowerCase() });
+  }
+  for (const v of findAll(root, "savedqueryvisualization")) {
+    const id = guid(text(v.savedqueryvisualizationid));
+    if (id) add(59, id, text(v.name) || id);
+  }
+  for (const c of findAll(root, "connectionreference")) {
+    const logical = String(c["@_connectionreferencelogicalname"] ?? "").toLowerCase();
+    if (logical) add(CT_CONNECTION_REFERENCE, logical, text(c.connectionreferencedisplayname) || logical, { connector: text(c.connectorid).split("/").pop() ?? "" });
+  }
+  // Any remaining $webresource: token (ribbon commands, icons, ...) is a web resource dependency of "customizations.xml".
+  const seenWr = new Set(references.filter((r) => r.to.type === 61).map((r) => r.to.key.toLowerCase()));
+  for (const m of content.matchAll(/\$webresource:([^"'<>\s&]+)/gi)) {
+    const name = webResourceName(m[1]);
+    if (!seenWr.has(name.toLowerCase())) { seenWr.add(name.toLowerCase()); references.push({ from: { type: 0, key: "customizations.xml", name: "Ribbon / other customizations" }, kind: "webresource-ref", to: { type: 61, key: name } }); }
+  }
+  const siteMaps = parseSiteMaps(root), apps = parseApps(root);
+  for (const a of apps) add(80, a.uniqueName, a.name);
   for (const r of arr(root.WebResources?.WebResource)) {
     add(61, text(r.Name), text(r.DisplayName), { webResourceType: Number(text(r.WebResourceType) || -1) });
   }
   for (const o of arr(root.optionsets?.optionset)) add(9, String(o["@_Name"] ?? ""), String(o["@_localizedName"] ?? ""));
   for (const r of roles) add(20, r.id.toLowerCase() || r.name, r.name);
   for (const p of fieldProfiles) add(24, p.id.toLowerCase() || p.name, p.name);
-  for (const a of arr(root.AppModules?.AppModule)) add(80, text(a.UniqueName), text(a.LocalizedNames?.LocalizedName?.["@_description"]));
   for (const c of arr(root.CanvasApps?.CanvasApp)) add(300, text(c.Name), text(c.DisplayName));
   for (const v of arr(root.EnvironmentVariableDefinitions?.EnvironmentVariableDefinition)) {
     add(380, String(v["@_schemaname"] ?? ""), text(v.displayname?.["@_description"] ?? v.displayname), {
@@ -289,5 +334,5 @@ export function parseCustomizationsXml(content: string): CustomizationsModel {
       mode: Number(s["@_Mode"] ?? -1),
     });
   }
-  return { inventory: items, entities: [...entities.values()], relationships, roles, fieldProfiles };
+  return { inventory: items, entities: [...entities.values()], relationships, roles, fieldProfiles, siteMaps, apps, references, workflowMeta };
 }

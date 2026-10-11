@@ -35,6 +35,7 @@ export const COMPONENT_TYPES: Record<number, string> = {
   401: "AI Project",
   402: "AI Configuration",
   430: "Entity Analytics Configuration",
+  9001: "Connection Reference",
   431: "Attribute Image Configuration",
   432: "Entity Image Configuration",
 };

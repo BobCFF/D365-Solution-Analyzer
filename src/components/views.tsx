@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { SolutionComparison } from "@/lib/d365/compare";
 import type { AccessLevel, ParsedSolution } from "@/lib/d365/types";
 import { downloadCsv, SEV_ORDER } from "./ui";
 
@@ -140,43 +139,6 @@ export function SecurityView({ sol }: { sol: ParsedSolution }) {
         ))}</tbody>
       </table></div>
     )}
-  </div>);
-}
-
-export function CompareView({ solutions, onCompare, result, busy }: {
-  solutions: SolutionRow[]; onCompare: (l: string, r: string) => void; result: SolutionComparison | null; busy: boolean;
-}) {
-  const [l, setL] = useState(""); const [r, setR] = useState("");
-  const list = (title: string, items: { typeName: string; key: string; displayName?: string; changes?: string[] }[], cls: string) => items.length > 0 && (
-    <div className="panel"><h2 className={cls}>{title} ({items.length})</h2>
-      <ul>{items.map((i) => <li key={i.typeName + i.key}>{i.typeName}: <span className="mono">{i.displayName || i.key}</span>{i.changes && <ul>{i.changes.map((c) => <li key={c}>{c}</li>)}</ul>}</li>)}</ul></div>
-  );
-  return (<div>
-    <div className="toolbar">
-      <SolutionPicker solutions={solutions} value={l || null} onChange={setL} />
-      <span className="muted">→</span>
-      <SolutionPicker solutions={solutions} value={r || null} onChange={setR} />
-      <button className="btn" disabled={!l || !r || l === r || busy} onClick={() => onCompare(l, r)}>Compare</button>
-    </div>
-    {!result && <div className="panel empty">Pick a base and a target solution (for example a release and its patch, or dev vs. prod).</div>}
-    {result && (<>
-      <p className="muted">{result.left.uniqueName} {result.left.version} → {result.right.uniqueName} {result.right.version} · {result.unchangedCount} unchanged</p>
-      {result.metadata.length > 0 && <div className="panel"><h2>Metadata</h2><ul>{result.metadata.map((m) => <li key={m.field}><b>{m.field}</b>: {m.left || "—"} → {m.right || "—"}</li>)}</ul></div>}
-      {list("Added", result.added, "add")}{list("Removed", result.removed, "rem")}{list("Changed", result.changed, "chg")}
-      {(result.columns ?? []).length > 0 && (
-        <div className="panel"><h2>Column changes ({result.columns.length})</h2>
-          <div className="tablewrap"><table><thead><tr><th>Table</th><th>Column</th><th>Change</th><th>Detail</th></tr></thead><tbody>
-            {result.columns.map((c, i) => (
-              <tr key={i}><td className="mono">{c.table}</td><td className="mono">{c.column}</td>
-                <td className={c.change === "added" ? "add" : c.change === "removed" || c.change === "type" ? "rem" : "chg"}>{c.change}{c.change === "type" && " ⚠ breaking"}</td>
-                <td>{c.from !== undefined ? `${c.from || "—"} → ${c.to || "—"}` : ""}</td></tr>
-            ))}</tbody></table></div></div>
-      )}
-      {result.roles && (result.roles.added.length > 0 || result.roles.removed.length > 0) && (
-        <div className="panel"><h2>Security roles</h2><ul>{result.roles.added.map((n) => <li key={"a" + n} className="add">+ {n}</li>)}{result.roles.removed.map((n) => <li key={"r" + n} className="rem">− {n}</li>)}</ul></div>
-      )}
-      {!result.added.length && !result.removed.length && !result.changed.length && !(result.columns ?? []).length && <div className="panel empty">No differences found.</div>}
-    </>)}
   </div>);
 }
 

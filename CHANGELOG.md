@@ -2,6 +2,18 @@
 
 All notable changes to this project are recorded here. Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/). The app version lives in `package.json` and is stamped on every in-app audit-log entry.
 
+## [0.3.0] - 2026-10-11
+### Added
+- **Missing-dependency engine** (`dependencies.ts`): builds a reference graph from site maps, model-driven apps, forms, web resources, flows, roles and schema, and resolves every edge against the solution, all other loaded solutions and the platform. Only clearly-custom absent components are flagged; GUID-addressed views/forms/roles are reported as "verify in target" to avoid false alarms. Rules `DEP101-DEP108`.
+- **Navigation analysis**: site map Area/Group/SubArea trees and app modules are parsed. Rules `NAV001` missing table, `NAV002` missing web resource, `NAV003` duplicate Id, `NAV004` no role can read the table, `NAV005` app without site map, `NAV006` empty area, `NAV007` sub area without target. New Navigation tab marks each item OK / missing / verify.
+- **Power Automate flow visualizer**: cloud flows (`Workflows/*.json`) become a safe summary model (no expressions or parameter values stored) and render as a pan/zoom SVG diagram with nested If/Switch/Foreach/Scope containers, run-after failure paths, connector/operation labels and a details pane. Flow dependencies (connection references, environment variables, child flows) feed the dependency engine. Rules `FLOW001`, `FLOW002`.
+- **Dependencies tab**: resolved dependency table with status filters and CSV export, plus a suggested **import order** for all loaded solutions (`/api/import-plan`).
+- **Compare redesign** modelled on Salesforce Analyzer: source/target pickers, compared-types sidebar with counts, status tabs (All / New / Different / Deleted / Identical), selectable tree grid (tables > columns, site maps > items), keyboard navigation, bottom pane with Summary, Dependencies (Uses / Used by) and a **flow diagram diff** (new / changed / deleted steps). Ticking rows shows deploy readiness: "Tick dependencies" adds required New/Different items, components missing from both sides block with a warning, and a deployment checklist can be exported.
+
+### Changed
+- Compare now runs in the browser from the two parsed solutions (the server still records it in the change log).
+- Internal pseudo component type `9001` = connection reference.
+
 ## [0.2.0] - 2026-10-11
 ### Added
 - Packages are now unpacked **in the browser**; only parsed metadata is sent to the server (no 4 MB zip limit, raw file never uploaded). Server validates the payload (`validate.ts`).
