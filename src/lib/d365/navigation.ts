@@ -1,7 +1,6 @@
 import { arr, findAll, guid, text } from "./xml";
 import type { ParsedApp, ParsedSiteMap, SiteMapSubArea } from "./types";
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
 const WR = /^\$webresource:/i;
 export const webResourceName = (v: string) => v.replace(WR, "").replace(/^\/?WebResources\//i, "");
 

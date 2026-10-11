@@ -8,4 +8,4 @@ npm install && npm run dev
 npm test && npm run typecheck
 ```
 
-The `.zip` is unpacked in the browser; only parsed metadata is stored (see `PRIVACY.md`). UI and conventions follow [D365 ERD Builder](https://github.com/BobCFF/D365-ERD-Builder). See `ARCHITECTURE.md`, `AGENTS.md`, `docs/DEPLOY.md`, `TODO.md`, `CHANGELOG.md`.
+The `.zip` is unpacked in the browser; only parsed metadata is stored (see `PRIVACY.md`). UI and conventions follow [D365 ERD Builder](https://github.com/BobCFF/D365-ERD-Builder). Review triage: `docs/REVIEW-ADOPTION.md`. Licensed MIT. See `ARCHITECTURE.md`, `AGENTS.md`, `docs/DEPLOY.md`, `TODO.md`, `CHANGELOG.md`.

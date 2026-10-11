@@ -12,6 +12,9 @@ Solution files describe a customer's data model, security roles, integrations an
 | Key compromise / rotation | Key ids in every envelope; `DATA_ENCRYPTION_KEYS_PREVIOUS` keeps old keys readable while `DATA_ENCRYPTION_KEY` encrypts new writes. The app **fails closed** (refuses to store) if no key is configured. |
 | Unauthorised accounts | JWT validated against Supabase Auth on every request; optional `ALLOWED_EMAILS` allow-list; disable public sign-up in Supabase for private deployments. |
 | XSS / data exfiltration from the page | Nonce-based CSP (no inline/eval/third-party scripts; `connect-src` limited to self + your Supabase), no framing, `nosniff`, no-referrer, HSTS, CORP/COOP. React escapes all rendered values; CSV exports neutralise spreadsheet formulas. |
+| Abuse / denial of wallet | Hourly limits on upload/analyze/compare (durable, counted from the user's own audit log), per-instance limits on heavy reads and export, a 200-solution quota, a 4 MB body cap and a zod schema that bounds every string and array. |
+| Cross-site request forgery | Auth is a Bearer header (never an ambient cookie); middleware additionally refuses cross-site `Origin` and non-JSON bodies on API writes. |
+| Malformed or hostile uploads | Deep zod validation; unknown keys are dropped; the analyzer only ever sees a validated structure. |
 | Caching of decrypted responses | `Cache-Control: no-store` on all API routes. |
 | Error leakage | API errors are generic; details go to server logs only (never include customer data in logs). |
 | Right to erasure | Settings: **Change log > Delete all my data** (`DELETE /api/account`) removes every row the user owns. |
@@ -26,6 +29,9 @@ Row ids, owner id, timestamps, finding rule id + severity (e.g. `DEP101`, `error
 4. Enable Supabase backups/PITR as usual: backups only contain ciphertext.
 5. Rotate: set a new `DATA_ENCRYPTION_KEY`, move the old value to `DATA_ENCRYPTION_KEYS_PREVIOUS`, redeploy. (Bulk re-encryption of old rows is on the TODO list; until then keep previous keys.)
 6. Keep dependencies patched (CI runs `npm audit`).
+
+## Self-check
+The **Status** panel (Change log tab, `GET /api/health`) shows configuration problems, whether the migration is applied, an encryption self-test and whether `ALLOWED_EMAILS` is set. The same problems are logged at startup. Logs are structured JSON with secrets and sealed values scrubbed, and never contain solution content.
 
 ## Reporting
 Please report vulnerabilities privately to the repository owner rather than in a public issue.

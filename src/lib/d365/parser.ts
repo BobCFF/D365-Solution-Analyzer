@@ -26,7 +26,6 @@ import type {
 
 export class SolutionParseError extends Error {}
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
 const MAX_UNCOMPRESSED_BYTES = 200 * 1024 * 1024;
 
 /**

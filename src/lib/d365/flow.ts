@@ -1,6 +1,5 @@
 import type { FlowNode, FlowNodeKind, ParsedFlow } from "./types";
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
 const KIND: Record<string, FlowNodeKind> = {
   If: "condition", Switch: "switch", Foreach: "loop", Until: "loop", Scope: "scope", Workflow: "childflow",
   Http: "http", HttpWebhook: "http", ApiConnection: "connector", ApiConnectionWebhook: "connector",
