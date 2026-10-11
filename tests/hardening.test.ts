@@ -62,3 +62,22 @@ describe("helpers", () => {
     expect(out[0]).not.toContain("abc"); expect(out[0]).not.toContain("enc:v1"); expect(out[0]).toContain("fine");
   });
 });
+
+describe("prefixed configuration (D365_SolAna_)", () => {
+  const key = () => `k:${randomBytes(32).toString("base64")}`;
+  it("reads prefixed names first and falls back to the plain ones", async () => {
+    const { getEnv } = await import("@/lib/server/config");
+    expect(getEnv("X", { D365_SolAna_X: "a", X: "b" })).toBe("a");
+    expect(getEnv("X", { D365_SolAna_X: "  ", X: "b" })).toBe("b");
+    expect(getEnv("X", { X: "b" })).toBe("b");
+  });
+  it("accepts a fully prefixed environment", () => {
+    const env = { D365_SolAna_SUPABASE_URL: "https://x.supabase.co", D365_SolAna_SUPABASE_ANON_KEY: "a", D365_SolAna_DATA_ENCRYPTION_KEY: key(), D365_SolAna_ALLOWED_EMAILS: "a@b.c" };
+    expect(envProblems(env)).toEqual([]);
+  });
+  it("loads prefixed encryption keys including previous keys", async () => {
+    const { loadKeyring } = await import("@/lib/server/crypto");
+    const ring = loadKeyring({ D365_SolAna_DATA_ENCRYPTION_KEY: key(), D365_SolAna_DATA_ENCRYPTION_KEYS_PREVIOUS: `old:${randomBytes(32).toString("base64")}` });
+    expect(ring.byId.size).toBe(2);
+  });
+});

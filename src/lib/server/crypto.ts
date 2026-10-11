@@ -14,6 +14,7 @@ import { createCipheriv, createDecipheriv, createHmac, hkdfSync, randomBytes } f
  * Server-only: never import this from a client component.
  */
 const PREFIX = "enc:v1:";
+import { getEnv, type EnvRecord } from "./config";
 
 export interface Keyring { current: { id: string; key: Buffer }; byId: Map<string, Buffer> }
 
@@ -31,12 +32,12 @@ function parseKey(spec: string, fallbackId: string): { id: string; key: Buffer }
 }
 
 /** DATA_ENCRYPTION_KEY = "<id>:<base64>" (or bare base64, id "k1"); DATA_ENCRYPTION_KEYS_PREVIOUS = comma-separated, for rotation. */
-export function loadKeyring(env: Record<string, string | undefined> = process.env): Keyring {
-  const cur = env.DATA_ENCRYPTION_KEY?.trim();
-  if (!cur) throw new EncryptionConfigError("DATA_ENCRYPTION_KEY is not set; refusing to store data unencrypted.");
+export function loadKeyring(env: EnvRecord = process.env): Keyring {
+  const cur = getEnv("DATA_ENCRYPTION_KEY", env)?.trim();
+  if (!cur) throw new EncryptionConfigError("DATA_ENCRYPTION_KEY (or D365_SolAna_DATA_ENCRYPTION_KEY) is not set; refusing to store data unencrypted.");
   const current = parseKey(cur, "k1");
   const byId = new Map([[current.id, current.key]]);
-  for (const [n, spec] of (env.DATA_ENCRYPTION_KEYS_PREVIOUS ?? "").split(",").map((s) => s.trim()).filter(Boolean).entries()) {
+  for (const [n, spec] of (getEnv("DATA_ENCRYPTION_KEYS_PREVIOUS", env) ?? "").split(",").map((s) => s.trim()).filter(Boolean).entries()) {
     const k = parseKey(spec, `p${n + 1}`);
     if (byId.has(k.id)) throw new EncryptionConfigError(`Duplicate encryption key id "${k.id}".`);
     byId.set(k.id, k.key);

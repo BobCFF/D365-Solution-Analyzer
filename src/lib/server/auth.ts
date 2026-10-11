@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { clientForRequest } from "@/lib/supabase";
+import { getEnv } from "./config";
 import { loadKeyring, EncryptionConfigError } from "./crypto";
 import { apiError } from "./api-response";
 
 export interface Ctx { db: SupabaseClient; userId: string; email: string }
 
-const allowed = () => (process.env.ALLOWED_EMAILS ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+const allowed = () => (getEnv("ALLOWED_EMAILS") ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
 
 /**
  * Authenticate the caller: verify the JWT (signature and expiry, via getClaims; Supabase falls back to a server check

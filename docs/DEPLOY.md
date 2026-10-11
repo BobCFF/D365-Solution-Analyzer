@@ -1,7 +1,7 @@
 # Deploying
 
 1. **Supabase**: create a project, apply `supabase/migrations/*.sql` (SQL editor or `supabase db push`), enable Email auth.
-2. **Vercel**: import the GitHub repo; set `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, **`DATA_ENCRYPTION_KEY`** (`echo "k1:$(openssl rand -base64 32)"`; mark as sensitive and back it up) and, for private deployments, `ALLOWED_EMAILS`. Follow `docs/SECURITY.md` for Supabase Auth settings (disable open sign-up, MFA).
+2. **Vercel**: import the GitHub repo; set `D365_SolAna_SUPABASE_URL`, `D365_SolAna_SUPABASE_ANON_KEY`, **`D365_SolAna_DATA_ENCRYPTION_KEY`** (the unprefixed names `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` and `DATA_ENCRYPTION_KEY` also work; Vercel needs a redeploy after any change because the Supabase values are inlined at build time) (`echo "k1:$(openssl rand -base64 32)"`; mark as sensitive and back it up) and, for private deployments, `ALLOWED_EMAILS`. Follow `docs/SECURITY.md` for Supabase Auth settings (disable open sign-up, MFA).
 3. Uploads are unpacked in the browser and only parsed JSON (limit ~4 MB) is posted, so large .zip files are fine; see TODO for very large schemas.
 
 ## Microsoft-supported practices applied
