@@ -1,5 +1,4 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { createHash } from "crypto";
 import { analyzeSolution } from "./d365/analyzer";
 import { componentTypeName } from "./d365/componentTypes";
 import type { Finding, ParsedSolution } from "./d365/types";
@@ -36,8 +35,7 @@ export async function analyzeAndStore(db: SupabaseClient, solutionId: string, pa
   return findings;
 }
 
-export async function insertSolution(db: SupabaseClient, parsed: ParsedSolution, fileName: string, bytes: Uint8Array) {
-  const sha = createHash("sha256").update(bytes).digest("hex");
+export async function insertSolution(db: SupabaseClient, parsed: ParsedSolution, fileName: string, sha: string) {
   const { data, error } = await db.from("solutions").insert({
     unique_name: parsed.uniqueName, friendly_name: parsed.friendlyName, version: parsed.version,
     managed: parsed.managed, parent_solution_name: parsed.parentSolutionName,

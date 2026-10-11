@@ -165,6 +165,90 @@ export function analyzeSolution(sol: ParsedSolution, ctx: AnalyzeContext = {}): 
     }
   }
 
+  f.push(...schemaRules(sol, others));
+  return f;
+}
+
+/** Rules that need the parsed schema (tables, relationships, security). Skipped silently on 0.1.0-era rows. */
+function schemaRules(sol: ParsedSolution, others: ParsedSolution[]): Finding[] {
+  const f: Finding[] = [];
+  const entities = sol.entities ?? [];
+  if (!entities.length && !(sol.roles?.length) && !(sol.fieldProfiles?.length)) return f;
+
+  const local = new Map(entities.map((e) => [e.logical, e]));
+  const elsewhere = new Set(others.flatMap((o) => (o.entities ?? []).map((e) => e.logical)));
+  // Standard/system tables have no publisher prefix and ship with the platform; only custom tables can be "missing".
+  const missingCustom = (name: string) => name.includes("_") && !local.has(name) && !elsewhere.has(name);
+
+  // Relationships whose other end is a custom table that isn't packaged or loaded.
+  const reported = new Set<string>();
+  for (const r of sol.relationships ?? []) {
+    for (const end of [r.referenced, r.referencing]) {
+      if (missingCustom(end) && !reported.has(`${r.name}|${end}`)) {
+        reported.add(`${r.name}|${end}`);
+        f.push({ ruleId: "REL001", severity: "warning", title: "Relationship points to a table not in the solution",
+          detail: `Relationship "${r.name}" (${r.referencing}.${r.attribute} -> ${r.referenced}) uses custom table "${end}", which is neither in this solution nor in any other loaded solution.`,
+          remediation: `Import the solution that owns "${end}" first, or add the table to this solution (as a shell if you only need the reference).`,
+          componentKey: end });
+      }
+    }
+  }
+
+  // Security role privileges on custom tables that aren't packaged.
+  const roleMiss = new Map<string, Set<string>>();
+  for (const role of sol.roles ?? []) {
+    for (const t of Object.keys(role.privileges)) {
+      if (missingCustom(t)) (roleMiss.get(t) ?? roleMiss.set(t, new Set()).get(t)!).add(role.name);
+    }
+  }
+  for (const [t, roles] of roleMiss) {
+    f.push({ ruleId: "SEC001", severity: "warning", title: "Security role grants privileges on a table not in the solution",
+      detail: `${roles.size} role(s) (${[...roles].slice(0, 3).join(", ")}${roles.size > 3 ? ", ..." : ""}) have privileges on "${t}".`,
+      remediation: "Import the solution that defines the table before this one, otherwise the role import fails or silently drops those privileges.",
+      componentKey: t });
+  }
+
+  // Field security profiles.
+  const securedCovered = new Set<string>();
+  for (const p of sol.fieldProfiles ?? []) {
+    for (const fp of p.permissions) {
+      securedCovered.add(`${fp.entity}.${fp.attribute}`);
+      const ent = local.get(fp.entity);
+      if (ent && !ent.attributes.some((a) => a.name === fp.attribute)) {
+        f.push({ ruleId: "FLD001", severity: "warning", title: "Field permission references an unknown column",
+          detail: `Profile "${p.name}" grants access to ${fp.entity}.${fp.attribute}, but that column is not in the solution's ${fp.entity} definition.`,
+          componentKey: `${fp.entity}.${fp.attribute}` });
+      } else if (ent && ent.attributes.find((a) => a.name === fp.attribute)?.secured === false) {
+        f.push({ ruleId: "FLD002", severity: "info", title: "Field permission on a column that is not secured",
+          detail: `${fp.entity}.${fp.attribute} is not marked as secured, so profile "${p.name}" has no effect on it.`,
+          componentKey: `${fp.entity}.${fp.attribute}` });
+      }
+    }
+  }
+  for (const e of entities) {
+    for (const a of e.attributes) {
+      if (a.secured && !securedCovered.has(`${e.logical}.${a.name}`)) {
+        f.push({ ruleId: "FLD003", severity: "info", title: "Secured column not covered by a profile in this solution",
+          detail: `${e.logical}.${a.name} is secured, but no field security profile in this solution grants access to it.`,
+          remediation: "Ensure a profile that grants access is deployed, or non-admin users will lose access to the data.",
+          componentKey: `${e.logical}.${a.name}` });
+      }
+    }
+  }
+
+  // Custom columns owned by another publisher.
+  const prefix = sol.publisher?.customizationPrefix?.toLowerCase();
+  if (prefix) {
+    for (const e of entities) {
+      if (e.prefix !== prefix) continue; // only audit tables this publisher owns
+      const foreign = e.attributes.filter((a) => a.custom && a.name.includes("_") && !a.name.startsWith(`${prefix}_`));
+      if (foreign.length) {
+        f.push({ ruleId: "ATT001", severity: "info", title: "Table contains columns from another publisher",
+          detail: `${e.logical} has ${foreign.length} column(s) not using prefix "${prefix}": ${foreign.slice(0, 4).map((a) => a.name).join(", ")}.`,
+          componentKey: e.logical });
+      }
+    }
+  }
   return f;
 }
 
