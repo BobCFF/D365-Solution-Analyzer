@@ -9,6 +9,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
+      <head>
+        {/* Paint the saved theme before first render to avoid a flash. */}
+        <script dangerouslySetInnerHTML={{ __html: `try{var t=localStorage.getItem("d365-sa-theme");if(t&&t!=="system")document.documentElement.setAttribute("data-theme",t)}catch(e){}` }} />
+      </head>
       <body>{children}</body>
     </html>
   );

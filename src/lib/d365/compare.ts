@@ -1,6 +1,13 @@
 import { componentTypeName } from "./componentTypes";
 import type { ParsedSolution } from "./types";
 
+export interface ColumnChange {
+  table: string;
+  column: string;
+  change: "added" | "removed" | "type" | "required";
+  from?: string;
+  to?: string;
+}
 export interface ComponentDiff {
   type: number;
   typeName: string;
@@ -18,6 +25,9 @@ export interface SolutionComparison {
   removed: ComponentDiff[];
   changed: ChangedComponent[];
   unchangedCount: number;
+  /** Column-level changes; "type" changes are breaking for data and for managed upgrades. */
+  columns: ColumnChange[];
+  roles: { added: string[]; removed: string[] };
 }
 
 interface Item {
@@ -81,6 +91,26 @@ export function compareSolutions(left: ParsedSolution, right: ParsedSolution): S
   const metadata = (Object.keys(lm) as (keyof typeof lm)[])
     .filter((f) => lm[f] !== rm[f]).map((f) => ({ field: f, left: lm[f], right: rm[f] }));
 
+  const columns: ColumnChange[] = [];
+  const re = new Map((right.entities ?? []).map((e) => [e.logical, e]));
+  for (const le of left.entities ?? []) {
+    const rent = re.get(le.logical);
+    if (!rent) continue;
+    const rattrs = new Map(rent.attributes.map((a) => [a.name, a]));
+    const lattrs = new Map(le.attributes.map((a) => [a.name, a]));
+    for (const [n, a] of lattrs) {
+      const b = rattrs.get(n);
+      if (!b) columns.push({ table: le.logical, column: n, change: "removed" });
+      else {
+        if (a.type && b.type && a.type !== b.type) columns.push({ table: le.logical, column: n, change: "type", from: a.type, to: b.type });
+        if (a.required !== b.required) columns.push({ table: le.logical, column: n, change: "required", from: a.required, to: b.required });
+      }
+    }
+    for (const n of rattrs.keys()) if (!lattrs.has(n)) columns.push({ table: le.logical, column: n, change: "added" });
+  }
+  const lroles = new Set((left.roles ?? []).map((r) => r.name)), rroles = new Set((right.roles ?? []).map((r) => r.name));
+  const roles = { added: [...rroles].filter((n) => !lroles.has(n)), removed: [...lroles].filter((n) => !rroles.has(n)) };
+
   const sum = (s: ParsedSolution) => ({ uniqueName: s.uniqueName, version: s.version, managed: s.managed });
-  return { left: sum(left), right: sum(right), metadata, added, removed, changed, unchangedCount: unchanged };
+  return { left: sum(left), right: sum(right), metadata, added, removed, changed, unchangedCount: unchanged, columns, roles };
 }

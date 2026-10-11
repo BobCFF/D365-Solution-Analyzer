@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { parseSolutionZip, SolutionParseError } from "@/lib/d365/parser";
+import { validateParsed } from "@/lib/d365/validate";
 import { clientForRequest } from "@/lib/supabase";
 import { analyzeAndStore, insertSolution, logChange } from "@/lib/store";
 
 export const runtime = "nodejs";
-const MAX_UPLOAD = 4 * 1024 * 1024; // Vercel serverless request body limit is ~4.5 MB
+const MAX_BODY = 4 * 1024 * 1024; // Vercel serverless request body limit is ~4.5 MB
 
 export async function GET(req: Request) {
   const db = clientForRequest(req);
@@ -17,25 +17,27 @@ export async function GET(req: Request) {
   return NextResponse.json({ solutions: data });
 }
 
+/**
+ * The browser unpacks the .zip and sends only the parsed model (the package itself never
+ * leaves the user's machine, and the Vercel request-body limit is not an issue).
+ */
 export async function POST(req: Request) {
   const db = clientForRequest(req);
   if (!db) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const form = await req.formData().catch(() => null);
-  const file = form?.get("file");
-  if (!(file instanceof File)) return NextResponse.json({ error: "Missing file" }, { status: 400 });
-  if (!file.name.toLowerCase().endsWith(".zip")) return NextResponse.json({ error: "Upload a .zip solution package" }, { status: 400 });
-  if (file.size > MAX_UPLOAD) return NextResponse.json({ error: "File exceeds the 4 MB upload limit" }, { status: 413 });
+  const len = Number(req.headers.get("content-length") ?? 0);
+  if (len > MAX_BODY) return NextResponse.json({ error: "Parsed solution is too large (4 MB limit)" }, { status: 413 });
+  const body = (await req.json().catch(() => null)) as { fileName?: unknown; fileSha256?: unknown; parsed?: unknown } | null;
+  if (typeof body?.fileName !== "string" || typeof body.fileSha256 !== "string" || !/^[0-9a-f]{64}$/.test(body.fileSha256))
+    return NextResponse.json({ error: "fileName and fileSha256 required" }, { status: 400 });
 
   try {
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    const parsed = await parseSolutionZip(bytes);
-    const id = await insertSolution(db, parsed, file.name, bytes);
+    const parsed = validateParsed(body.parsed);
+    const id = await insertSolution(db, parsed, body.fileName.slice(0, 260), body.fileSha256);
     const findings = await analyzeAndStore(db, id, parsed);
     await logChange(db, "upload", "solution", id,
       `Loaded ${parsed.uniqueName} ${parsed.version} (${parsed.managed ? "managed" : "unmanaged"}${parsed.parentSolutionName ? ", patch" : ""}); ${findings.length} finding(s)`);
     return NextResponse.json({ id, findings }, { status: 201 });
   } catch (e) {
-    const status = e instanceof SolutionParseError ? 422 : 500;
-    return NextResponse.json({ error: (e as Error).message }, { status });
+    return NextResponse.json({ error: (e as Error).message }, { status: 422 });
   }
 }

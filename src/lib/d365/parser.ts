@@ -2,7 +2,15 @@ import JSZip from "jszip";
 import { XMLParser } from "fast-xml-parser";
 import { componentTypeName } from "./componentTypes";
 import type {
+  AccessLevel,
+  EntityAttribute,
+  FieldPermission,
   InventoryItem,
+  ParsedEntity,
+  ParsedFieldProfile,
+  ParsedRelationship,
+  ParsedRole,
+  RelationshipCategory,
   MissingDependency,
   ParsedSolution,
   Publisher,
@@ -56,7 +64,7 @@ export async function parseSolutionZip(data: Uint8Array | ArrayBuffer | Buffer):
 
   const parsed = parseSolutionXml(solutionXml);
   parsed.files = files;
-  parsed.inventory = customizationsXml ? parseCustomizationsXml(customizationsXml) : [];
+  if (customizationsXml) Object.assign(parsed, parseCustomizationsXml(customizationsXml));
   return parsed;
 }
 
@@ -116,24 +124,141 @@ export function parseSolutionXml(content: string): ParsedSolution {
 }
 
 /** Extract an inventory of notable components from customizations.xml. */
-export function parseCustomizationsXml(content: string): InventoryItem[] {
+export interface CustomizationsModel {
+  inventory: InventoryItem[];
+  entities: ParsedEntity[];
+  relationships: ParsedRelationship[];
+  roles: ParsedRole[];
+  fieldProfiles: ParsedFieldProfile[];
+}
+
+/**
+ * Relationship category, modelled on D365 ERD Builder's catFn so both tools classify
+ * lookups the same way (audit / ownership / portal / generic / business).
+ */
+export function relationshipCategory(name: string, referenced: string, attr: string): RelationshipCategory {
+  const n = name.toLowerCase(), a = attr.toLowerCase(), rd = referenced.toLowerCase();
+  if (["createdby", "modifiedby", "createdonbehalfby", "modifiedonbehalfby"].includes(a)) return "audit";
+  if (["owninguser", "owningteam", "owningbusinessunit"].includes(a) || a.startsWith("owner")) return "ownership";
+  if (["businessunit", "organization", "team"].includes(rd) || /^(business_unit_|organization_|team_|owner_|lk_|user_)/.test(n)) return "ownership";
+  if (/^(adx_|mspp_|msa_)/.test(n)) return "portal";
+  if (GENERIC_TABLES.has(rd) || /^(activity_pointer_|transactioncurrency_|fileattachment_|processstage_|sla|bulkdelete|duplicate|principalobjectattribute|import)/.test(n)) return "generic";
+  return "business";
+}
+const GENERIC_TABLES = new Set(["lead", "opportunity", "quote", "invoice", "salesorder", "incident", "site", "campaign", "campaignactivity", "bulkoperation", "sla", "mailbox", "service", "bookableresource", "bookableresourcebooking", "bookableresourcebookingheader", "knowledgebaserecord", "knowledgearticle", "interactionforemail", "recurringappointmentmaster", "activityparty", "processstage", "asyncoperation", "workflow", "transactioncurrency", "fileattachment", "approvalprocess", "approvalstageapproval"]);
+
+const VERBS: [string, string][] = [["appendto", "AppendTo"], ["append", "Append"], ["create", "Create"], ["read", "Read"], ["write", "Write"], ["delete", "Delete"], ["assign", "Assign"], ["share", "Share"]];
+/** Privilege names are prv<Verb><entity>; AppendTo is tested before Append (shared prefix). */
+export function parsePrivilegeName(name: string): { verb: string; entity: string } | null {
+  if (!name || name.slice(0, 3) !== "prv") return null;
+  const body = name.slice(3);
+  for (const [verb, P] of VERBS) if (body.startsWith(P)) return { verb, entity: body.slice(P.length).toLowerCase() };
+  return null;
+}
+/** Privilege depth is a word (Basic/Local/Deep/Global) or mask number (1/2/4/8; 0 = none). */
+export function parsePrivilegeLevel(v: string): AccessLevel {
+  const x = v.trim().toLowerCase();
+  if (x === "1" || x === "basic" || x === "user") return "user";
+  if (x === "2" || x === "local" || x === "businessunit" || x === "bu") return "bu";
+  if (x === "4" || x === "deep" || x === "parentchild") return "deep";
+  if (x === "8" || x === "global" || x === "organization" || x === "org") return "org";
+  return "none";
+}
+export const LEVEL_RANK: Record<AccessLevel, number> = { none: 0, user: 1, bu: 2, deep: 3, org: 4 };
+const permAllowed = (v: unknown) => { const x = String(v ?? "").trim(); return x !== "" && x !== "0" && x.toLowerCase() !== "false"; };
+const truthy = (v: string) => /^(1|true|yes)$/i.test(v.trim());
+
+export function parseCustomizationsXml(content: string): CustomizationsModel {
   const root = xml.parse(content)?.ImportExportXml;
-  if (!root) return [];
+  const empty: CustomizationsModel = { inventory: [], entities: [], relationships: [], roles: [], fieldProfiles: [] };
+  if (!root) return empty;
   const items: InventoryItem[] = [];
   const add = (type: number, key: string, displayName?: string, details?: InventoryItem["details"]) => {
     if (key) items.push({ type, typeName: componentTypeName(type), key, displayName, details });
   };
 
+  const entities = new Map<string, ParsedEntity>();
   for (const e of arr(root.Entities?.Entity)) {
-    const name = text(e.Name);
-    const attrs = arr(e.EntityInfo?.entity?.attributes?.attribute).map((a) => String(a["@_PhysicalName"] ?? "")).filter(Boolean);
-    add(1, name.toLowerCase(), e.Name?.["@_LocalizedName"], {
-      attributes: attrs,
-      attributeCount: attrs.length,
-      forms: arr(e.FormXml?.forms).reduce((n: number, f: any) => n + arr(f.systemform).length, 0),
-      views: arr(e.SavedQueries?.savedqueries?.savedquery).length,
-    });
+    const logical = text(e.Name).toLowerCase();
+    if (!logical) continue;
+    const attrs: EntityAttribute[] = [];
+    for (const a of arr(e.EntityInfo?.entity?.attributes?.attribute)) {
+      const name = (text(a.LogicalName) || text(a.Name)).toLowerCase();
+      if (!name) continue;
+      const dn = arr(a.displaynames?.displayname)[0];
+      const att: EntityAttribute = {
+        name, type: text(a.Type), required: text(a.RequiredLevel), display: String(dn?.["@_description"] ?? ""),
+      };
+      if (text(a.IsCustomField)) att.custom = truthy(text(a.IsCustomField));
+      if (text(a.IsSecured)) att.secured = truthy(text(a.IsSecured));
+      if (text(a.IsAuditEnabled)) att.audit = truthy(text(a.IsAuditEnabled));
+      if (text(a.OptionSetName)) att.optionSet = text(a.OptionSetName);
+      if (text(a.MaxLength)) att.maxLength = text(a.MaxLength);
+      if (text(a.Format)) att.format = text(a.Format);
+      if (att.type.toLowerCase() === "primarykey" || name === `${logical}id` || name === "activityid") att.pk = true;
+      attrs.push(att);
+    }
+    const prev = entities.get(logical);
+    if (prev) {
+      const have = new Set(prev.attributes.map((x) => x.name));
+      for (const x of attrs) if (!have.has(x.name)) prev.attributes.push(x);
+    } else {
+      const idx = logical.indexOf("_");
+      entities.set(logical, { logical, display: String(e.Name?.["@_LocalizedName"] ?? logical), prefix: idx > 0 ? logical.slice(0, idx) : "", attributes: attrs });
+    }
   }
+  const relationships: ParsedRelationship[] = [];
+  const seenRel = new Set<string>();
+  for (const r of arr(root.EntityRelationships?.EntityRelationship)) {
+    const type = text(r.EntityRelationshipType);
+    const referenced = text(r.ReferencedEntityName).toLowerCase(), referencing = text(r.ReferencingEntityName).toLowerCase();
+    const attribute = text(r.ReferencingAttributeName).toLowerCase();
+    const key = `${referenced}|${referencing}|${attribute}|${type}`;
+    if (seenRel.has(key)) continue;
+    seenRel.add(key);
+    const name = String(r["@_Name"] ?? "");
+    relationships.push({ name, type, referenced, referencing, attribute, category: relationshipCategory(name, referenced, attribute) });
+  }
+  for (const r of relationships) {
+    if (r.type !== "OneToMany") continue;
+    const att = entities.get(r.referencing)?.attributes.find((x) => x.name === r.attribute);
+    if (att) att.targets = [...new Set([...(att.targets ?? []), r.referenced])];
+  }
+  for (const en of entities.values()) {
+    const names = en.attributes.map((a) => a.name);
+    add(1, en.logical, en.display, { attributes: names, attributeCount: names.length });
+  }
+
+  const roles: ParsedRole[] = [];
+  for (const role of arr(root.Roles?.Role)) {
+    const name = String(role["@_name"] ?? role["@_id"] ?? "").trim();
+    if (!name) continue;
+    const privileges: ParsedRole["privileges"] = {};
+    for (const rp of arr(role.RolePrivileges?.RolePrivilege)) {
+      const pp = parsePrivilegeName(String(rp["@_name"] ?? ""));
+      const level = parsePrivilegeLevel(String(rp["@_level"] ?? ""));
+      if (!pp || level === "none") continue;
+      const cur = (privileges[pp.entity] ??= {});
+      if (!cur[pp.verb] || LEVEL_RANK[level] > LEVEL_RANK[cur[pp.verb]]) cur[pp.verb] = level;
+    }
+    roles.push({ id: String(role["@_id"] ?? ""), name, privileges });
+  }
+  roles.sort((a, b) => a.name.localeCompare(b.name));
+
+  const fieldProfiles: ParsedFieldProfile[] = [];
+  for (const prof of arr(root.FieldSecurityProfiles?.FieldSecurityProfile)) {
+    const name = String(prof["@_name"] ?? prof["@_fieldsecurityprofileid"] ?? prof["@_id"] ?? "").trim();
+    if (!name) continue;
+    const permissions: FieldPermission[] = [];
+    for (const fp of arr(prof.FieldPermissions?.FieldPermission)) {
+      const entity = String(fp["@_entityname"] ?? "").toLowerCase(), attribute = String(fp["@_attributename"] ?? "").toLowerCase();
+      if (!entity || !attribute) continue;
+      permissions.push({ entity, attribute, create: permAllowed(fp["@_cancreate"]), read: permAllowed(fp["@_canread"]), update: permAllowed(fp["@_canupdate"]) });
+    }
+    fieldProfiles.push({ id: String(prof["@_fieldsecurityprofileid"] ?? prof["@_id"] ?? ""), name, permissions });
+  }
+  fieldProfiles.sort((a, b) => a.name.localeCompare(b.name));
+
   for (const w of arr(root.Workflows?.Workflow)) {
     add(29, String(w["@_WorkflowId"] ?? w["@_Name"] ?? "").toLowerCase(), w["@_Name"], {
       category: Number(text(w.Category) || -1),
@@ -145,8 +270,8 @@ export function parseCustomizationsXml(content: string): InventoryItem[] {
     add(61, text(r.Name), text(r.DisplayName), { webResourceType: Number(text(r.WebResourceType) || -1) });
   }
   for (const o of arr(root.optionsets?.optionset)) add(9, String(o["@_Name"] ?? ""), String(o["@_localizedName"] ?? ""));
-  for (const r of arr(root.Roles?.Role)) add(20, String(r["@_id"] ?? "").toLowerCase(), String(r["@_name"] ?? ""));
-  for (const p of arr(root.FieldSecurityProfiles?.FieldSecurityProfile)) add(24, String(p["@_fieldsecurityprofileid"] ?? p["@_name"] ?? "").toLowerCase(), String(p["@_name"] ?? ""));
+  for (const r of roles) add(20, r.id.toLowerCase() || r.name, r.name);
+  for (const p of fieldProfiles) add(24, p.id.toLowerCase() || p.name, p.name);
   for (const a of arr(root.AppModules?.AppModule)) add(80, text(a.UniqueName), text(a.LocalizedNames?.LocalizedName?.["@_description"]));
   for (const c of arr(root.CanvasApps?.CanvasApp)) add(300, text(c.Name), text(c.DisplayName));
   for (const v of arr(root.EnvironmentVariableDefinitions?.EnvironmentVariableDefinition)) {
@@ -164,5 +289,5 @@ export function parseCustomizationsXml(content: string): InventoryItem[] {
       mode: Number(s["@_Mode"] ?? -1),
     });
   }
-  return items;
+  return { inventory: items, entities: [...entities.values()], relationships, roles, fieldProfiles };
 }

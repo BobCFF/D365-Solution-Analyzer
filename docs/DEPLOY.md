@@ -2,7 +2,7 @@
 
 1. **Supabase**: create a project, apply `supabase/migrations/*.sql` (SQL editor or `supabase db push`), enable Email auth.
 2. **Vercel**: import the GitHub repo; set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
-3. Note: Vercel functions accept ~4.5 MB request bodies, so uploads are capped at 4 MB. Larger packages need direct-to-Supabase-Storage upload (planned).
+3. Uploads are unpacked in the browser and only parsed JSON (limit ~4 MB) is posted, so large .zip files are fine; see TODO for very large schemas.
 
 ## Microsoft-supported practices applied
 - Reads packages produced by the platform export or `pac solution export` (Power Platform CLI); no unsupported modification of packages.
