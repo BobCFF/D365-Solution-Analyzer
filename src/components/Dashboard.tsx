@@ -8,6 +8,7 @@ import { parseSolutionZip } from "@/lib/d365/parser";
 import type { ParsedSolution } from "@/lib/d365/types";
 import { APP_VERSION } from "@/lib/version";
 import { asOneOf, asString } from "@/lib/uiStateStore";
+import { ProgressProvider, useProgress, yieldToUi } from "./progress";
 import { UiStateProvider, useSavedState, useUiStore } from "./uiState";
 import { Confirm, ThemeCycle, Toast } from "./ui";
 import { CompareApp } from "./CompareApp";
@@ -24,7 +25,7 @@ const TAB_IDS = TABS.map(([id]) => id) as readonly Tab[];
 
 /** Everything below remembers the user's place (page, selected solution, filters, sorts, columns) in this browser, per account. */
 export function Dashboard(props: { token: string; email: string; userId: string; onSignOut: () => void }) {
-  return <UiStateProvider key={props.userId} userId={props.userId}><DashboardInner {...props} /></UiStateProvider>;
+  return <UiStateProvider key={props.userId} userId={props.userId}><ProgressProvider><DashboardInner {...props} /></ProgressProvider></UiStateProvider>;
 }
 
 function DashboardInner({ token, email, onSignOut }: { token: string; email: string; userId: string; onSignOut: () => void }) {
@@ -48,7 +49,8 @@ function DashboardInner({ token, email, onSignOut }: { token: string; email: str
   const [confirmPurge, setConfirmPurge] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
-  const api = useMemo(() => makeApi(token), [token]);
+  const progress = useProgress();
+  const api = useMemo(() => makeApi(token, (label) => progress.begin(label, { auto: true }).end), [token, progress]);
 
   const refresh = useCallback(async () => {
     try {
@@ -89,19 +91,26 @@ function DashboardInner({ token, email, onSignOut }: { token: string; email: str
     if (goTo) setTab(goTo);
   }, [api, setSelected, setTab]);
 
-  const upload = (files: FileList | File[]) => run(async () => {
-    let last: string | null = null;
-    for (const file of Array.from(files)) {
+  const upload = (files: FileList | File[]) => run(() => progress.track("Loading solutions", async (h) => {
+    const list = Array.from(files); let last: string | null = null;
+    const at = (i: number, stage: number, detail: string) => h.set({ pct: ((i + stage) / list.length) * 90, detail: `${list[i].name} (${i + 1} of ${list.length}): ${detail}` });
+    for (let i = 0; i < list.length; i++) {
+      const file = list[i];
       if (!file.name.toLowerCase().endsWith(".zip")) throw new Error(`${file.name}: upload the solution .zip (not the extracted XML).`);
+      at(i, 0.05, "reading the file in your browser"); await yieldToUi();
       const buf = await file.arrayBuffer();
+      at(i, 0.2, "unpacking and parsing in your browser"); await yieldToUi();
       const model = await parseSolutionZip(new Uint8Array(buf)); // unpacked in the browser; the .zip itself is never uploaded
+      at(i, 0.6, "encrypting and saving the parsed metadata");
       const { id } = await api<{ id: string }>("/api/solutions", { method: "POST", json: { fileName: file.name, fileSha256: await sha256(buf), parsed: model } });
       last = id;
+      at(i, 1, "saved");
       setToast(`Loaded ${model.uniqueName} ${model.version}`);
     }
+    h.set({ pct: 95, detail: "Refreshing the list and opening the analysis" });
     await refresh();
     if (last) await open(last, "analysis");
-  });
+  }, { immediate: true }));
 
   const rerun = () => run(async () => {
     if (!selected) return;

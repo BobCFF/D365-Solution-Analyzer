@@ -2,6 +2,10 @@
 
 All notable changes to this project are recorded here. Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/). The app version lives in `package.json` and is stamped on every in-app audit-log entry.
 
+## [0.11.0] - 2026-10-12
+### Added
+- **Progress dialog whenever the app is working.** Every request to the server (loading solutions, opening one, dependency resolution, import plan, re-run analysis, delete, data export, comparison log) shows a modal "please wait" dialog with a plain-language label. Uploading solutions shows named stages with a percentage per file (reading, unpacking/parsing in the browser, encrypting and saving) and Compare shows its loading/comparing steps. The dialog appears after 0.2 s (no flicker on quick calls), stays at least 0.5 s once shown, cannot be dismissed with Esc, and respects reduced-motion.
+
 ## [0.10.0] - 2026-10-12
 ### Added
 - **Adjustable column widths** on every table (including the Compare grid): drag the edge of a header, or focus it and use the left/right arrow keys. Double-click an edge, or press Reset in the Columns list, to restore automatic widths. Widths are remembered per account in this browser with the rest of the saved view (clamped to 48-1,200 px; unknown columns ignored).
