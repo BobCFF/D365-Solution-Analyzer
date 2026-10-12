@@ -137,3 +137,64 @@ describe("applying a target check to missing rows (0.12.0)", () => {
     expect(applyTargetResult(rows, null)).toBe(rows);
   });
 });
+
+import { createPublicKey, verify, X509Certificate } from "node:crypto";
+import { buildClientAssertion, generateCertificate, inspectCertificate, keyMatchesCertificate } from "@/lib/server/certificate";
+
+describe("certificate sign-in (0.13.0)", () => {
+  const gen = generateCertificate("D365 Solution Analyzer - Prod");
+  it("generates a valid self-signed certificate that Node can parse and verify", () => {
+    const c = new X509Certificate(gen.certificatePem);
+    expect(c.subject).toBe("CN=D365 Solution Analyzer - Prod");
+    expect(c.issuer).toBe(c.subject);
+    expect(c.verify(c.publicKey)).toBe(true);                         // self-signature checks out
+    expect(c.publicKey.asymmetricKeyDetails?.modulusLength).toBe(2048);
+    expect(Date.parse(c.validTo) - Date.now()).toBeGreaterThan(700 * 86_400_000);
+    expect(keyMatchesCertificate(gen.privateKeyPem, gen.certificatePem)).toBe(true);
+    expect(keyMatchesCertificate(generateCertificate("other").privateKeyPem, gen.certificatePem)).toBe(false);
+    expect(gen.privateKeyPem).toMatch(/BEGIN PRIVATE KEY/);
+    expect(gen.certificatePem).not.toMatch(/PRIVATE/);
+  });
+  it("reports thumbprints and expiry", () => {
+    const i = inspectCertificate(gen.certificatePem);
+    expect(i.thumbprint).toMatch(/^[0-9a-f]{40}$/); expect(i.thumbprintSha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(new Date(i.expiresAt).getTime()).toBeGreaterThan(Date.now());
+  });
+  it("builds an RS256 client assertion Entra can verify (header thumbprints, claims, signature)", () => {
+    const aud = `https://login.microsoftonline.com/${GUID}/oauth2/v2.0/token`;
+    const jwt = buildClientAssertion({ clientId: GUID, audience: aud, privateKeyPem: gen.privateKeyPem, certificatePem: gen.certificatePem });
+    const [h, p, s] = jwt.split(".");
+    const header = JSON.parse(Buffer.from(h, "base64url").toString()), claims = JSON.parse(Buffer.from(p, "base64url").toString());
+    const c = new X509Certificate(gen.certificatePem);
+    expect(header.alg).toBe("RS256");
+    expect(header["x5t#S256"]).toBe(Buffer.from(c.fingerprint256.replace(/:/g, ""), "hex").toString("base64url"));
+    expect(header.x5t).toBe(Buffer.from(c.fingerprint.replace(/:/g, ""), "hex").toString("base64url"));
+    expect(claims).toMatchObject({ aud, iss: GUID, sub: GUID });
+    expect(claims.exp - claims.nbf).toBe(600);
+    expect(verify("sha256", Buffer.from(`${h}.${p}`), createPublicKey(gen.certificatePem), Buffer.from(s, "base64url"))).toBe(true);
+  });
+  it("signs in with the assertion and never sends a secret or the private key", async () => {
+    const { f, calls } = mockFetch((u) => tokenOk(u) ?? { body: {} });
+    await getAccessToken({ ...cfg, clientSecret: undefined, authType: "certificate", privateKeyPem: gen.privateKeyPem, certificatePem: gen.certificatePem }, f);
+    const body = new URLSearchParams(String(calls[0].init?.body));
+    expect(body.get("client_assertion_type")).toBe("urn:ietf:params:oauth:client-assertion-type:jwt-bearer");
+    expect(body.get("client_assertion")?.split(".")).toHaveLength(3);
+    expect(body.has("client_secret")).toBe(false);
+    expect(String(calls[0].init?.body)).not.toContain("PRIVATE");
+  });
+  it("still signs in with a client secret for older rows that have no authType", async () => {
+    const { f, calls } = mockFetch((u) => tokenOk(u) ?? { body: {} });
+    await getAccessToken(cfg, f);
+    expect(new URLSearchParams(String(calls[0].init?.body)).get("client_secret")).toBe(SECRET);
+  });
+  it("explains a certificate that Entra does not know", async () => {
+    const { f } = mockFetch(() => ({ status: 401, body: { error_description: "AADSTS700027: Client assertion contains an invalid signature." } }));
+    const e = (await getAccessToken({ ...cfg, authType: "certificate", privateKeyPem: gen.privateKeyPem, certificatePem: gen.certificatePem }, f).catch((x) => x)) as DataverseError;
+    expect(e.message).toMatch(/Upload the public certificate/);
+  });
+  it("form validation: certificate needs no secret; the default stays client secret", () => {
+    const base = { name: "P", environmentUrl: "https://org.crm.dynamics.com", tenantId: GUID, clientId: GUID };
+    expect(validateConnectionInput({ ...base, authType: "certificate" })).toEqual({ ...base, authType: "certificate" });
+    expect(() => validateConnectionInput({ ...base })).toThrow(/secret/i);
+  });
+});

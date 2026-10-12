@@ -25,6 +25,8 @@ Solution files describe a customer's data model, security roles, integrations an
 - SSRF/credential-exfiltration guard: only `https://<org>.crm[N].dynamics.com|.dynamics.cn|.microsoftdynamics.us|.appsplatform.us` hosts are accepted (validated on save and on every call); the sign-in authority is derived from that cloud, never user-supplied; redirects are not followed; `@odata.nextLink` is followed only inside the same environment; query values are validated against an allow-list pattern and quote-escaped.
 - Rate limits: 10 tests/min, 6 verifications/min and 60/hour per user; at most 10 saved connections.
 
+- **Certificate sign-in (recommended)** removes the stored secret: the app generates the RSA-2048 key pair, seals the private key with everything else, and exposes only the public certificate (`GET /api/connections/:id/certificate`). Entra authenticates a short-lived (10 min) signed assertion; a stolen database or backup contains no usable credential. Certificates last ~2 years; the UI warns 30 days before expiry. A compromise of the server *and* its encryption key would still expose the private key, so keep the Entra application user read-only.
+
 ## What is *not* encrypted (by design)
 Row ids, owner id, timestamps, finding rule id + severity (e.g. `DEP101`, `error`), audit action type, app version, and row counts. These identify no customer component.
 

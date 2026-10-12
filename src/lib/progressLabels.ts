@@ -3,6 +3,7 @@ export function labelFor(path: string, method = "GET"): string {
   const p = path.split("?")[0].replace(/\/+$/, "");
   const m = method.toUpperCase();
   if (/^\/api\/solutions\/[^/]+\/verify$/.test(p)) return "Checking components in the target environment";
+  if (/^\/api\/connections\/[^/]+\/certificate$/.test(p)) return "Preparing the certificate";
   if (/^\/api\/connections\/[^/]+\/test$/.test(p)) return "Testing the connection";
   if (/^\/api\/connections\/[^/]+$/.test(p)) return "Deleting connection";
   if (p === "/api/connections") return m === "POST" ? "Saving connection (encrypted)" : "Loading your connections";

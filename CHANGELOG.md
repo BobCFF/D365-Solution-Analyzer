@@ -2,6 +2,14 @@
 
 All notable changes to this project are recorded here. Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/). The app version lives in `package.json` and is stamped on every in-app audit-log entry.
 
+## [0.13.0] - 2026-10-13
+### Added
+- **Certificate sign-in for Dynamics 365 connections (recommended).** Choose *Certificate* when adding a connection and the app generates the RSA-2048 key pair and a self-signed certificate itself. The **private key is encrypted straight into the database and never shown, downloaded or sent anywhere**; you only download the public `.cer` and upload it to the app registration (Entra > Certificates & secrets > Certificates). Sign-in uses a signed client assertion (RFC 7523, RS256, `x5t`/`x5t#S256` headers, 10-minute lifetime), so **no client secret exists to leak**.
+- The Environments table shows each connection's sign-in method and certificate expiry (highlighted within 30 days), and a **Certificate** action re-downloads the public certificate. Entra error codes for certificate problems now give plain-language fixes.
+- Client-secret connections still work unchanged (existing saved connections need no action).
+
+**Migration:** none (the certificate is stored inside the existing sealed connection value).
+
 ## [0.12.0] - 2026-10-13
 ### Added
 - **Connect a Dynamics 365 environment** (new **Environments** tab) and **verify missing dependencies against it**. On Analysis > Missing dependencies, pick a saved environment and press *Verify against environment*: every component still missing after looking at all loaded solutions (including GUID-addressed views, forms, roles and dashboards that were previously only "to verify") is looked up in the real environment, and a new **In target environment** column shows *Present*, *Missing in target* or *Not checked*. Present rows drop to info severity, confirmed-missing rows say so, and required solutions are compared against the installed solutions and versions (e.g. "installed 1.2.0.0 is older than the required 2.0.0.0").

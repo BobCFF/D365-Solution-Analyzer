@@ -146,7 +146,7 @@ export async function exportAll(ctx: Ctx) {
     solutions: (sol.data ?? []).map((r) => ({ id: r.id, createdAt: r.created_at, meta: unseal("solution.meta", r.meta), parsed: unseal("solution.parsed", r.parsed) })),
     findings: (fnd.data ?? []).map((r) => ({ id: r.id, solutionId: r.solution_id, ruleId: r.rule_id, severity: r.severity, analyzedAt: r.analyzed_at, ...(unseal<FindingPayload>("finding.payload", r.payload) ?? {}) })),
     comparisons: (cmp.data ?? []).map((r) => ({ id: r.id, left: r.left_solution_id, right: r.right_solution_id, createdAt: r.created_at, result: unseal("comparison.result", r.result) })),
-    connections: con.connections.map(({ id, name, environmentUrl, tenantId, clientId, createdAt }) => ({ id, name, environmentUrl, tenantId, clientId, createdAt })), // client secrets are never exported
+    connections: con.connections.map(({ id, name, environmentUrl, tenantId, clientId, createdAt, authType, certThumbprint, certExpires }) => ({ id, name, environmentUrl, tenantId, clientId, createdAt, authType, certThumbprint, certExpires })), // client secrets and private keys are never exported
     history: (lg.data ?? []).map((r) => ({ id: r.id, action: r.action, entity: r.entity, entityId: r.entity_id, appVersion: r.app_version, createdAt: r.created_at, summary: unseal<string>("log.summary", r.summary) })),
   };
 }
