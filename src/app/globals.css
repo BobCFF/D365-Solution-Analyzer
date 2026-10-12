@@ -220,3 +220,10 @@ details.multi>summary{list-style:none;cursor:pointer;display:inline-flex}
 details.multi>summary::-webkit-details-marker{display:none}
 .multi-pop{position:absolute;z-index:10;top:calc(100% + 6px);left:0;min-width:300px;max-width:min(92vw,440px);max-height:60vh;overflow:auto;background:var(--surface);border:1px solid var(--field-line);border-radius:10px;padding:12px;box-shadow:var(--shadow)}
 .multi-pop ul{list-style:none;margin:8px 0 0;padding:0}.multi-pop li{margin:4px 0}
+
+/* ---- column-filter table ---- */
+.coltable th{vertical-align:bottom}
+.coltable .thbtn{background:none;border:0;padding:0;font:inherit;font-weight:600;color:var(--ink);cursor:pointer;white-space:nowrap}
+.coltable tr.filterrow th{top:34px;background:var(--surface);padding:4px 6px;border-bottom:1px solid var(--border)}
+.coltable tr.filterrow input,.coltable tr.filterrow select{width:100%;min-width:90px;padding:3px 6px;font-size:12.5px}
+.coltable td.wrap{white-space:normal;min-width:240px}

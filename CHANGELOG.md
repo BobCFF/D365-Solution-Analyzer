@@ -2,6 +2,17 @@
 
 All notable changes to this project are recorded here. Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/). The app version lives in `package.json` and is stamped on every in-app audit-log entry.
 
+## [0.7.0] - 2026-10-12
+### Added
+- **Analysis page leads with a parsed Missing dependencies table**: one row per missing dependency, merging the platform's own `MissingDependencies` from `solution.xml` with this tool's reference scan (navigation, forms, apps, flows, roles, schema), de-duplicated. Columns: severity, required type, required component (name + key), required solution (name + version, Microsoft/system tag), availability (is the required solution loaded in your workspace?), required by (type, name, where), how to fix; plus optional Status, Parent of required, Required-by type, Relationship and Source. "All findings" is one click away.
+- **Reusable column-filter table** (`ColumnTable`): a filter under every column header (dropdown with counts for set-like columns, text box otherwise), sortable headers (numeric-aware), a **Columns** menu to show/hide columns (remembered in the browser), Clear column filters, and CSV export of the visible rows and columns. The Solutions dropdown / Hide Microsoft-system toggle applies to the table too.
+- The parser now keeps the structured fields of `MissingDependency` (key, parent, solution name and version split out of `"Name (1.0.0.0)"`). Packages loaded before 0.7.0 show the same table with fewer fields until re-uploaded.
+- `/api/solutions/[id]/dependencies` also returns the names of the other loaded solutions.
+
+### Fixed
+- Solution names in findings and the import-order planner no longer include the version suffix from `solution.xml` (`"Name (1.0.0.0)"`), which broke solution filtering and ordering.
+- Dropdown menus (Solutions, Columns) close on Esc, on an outside click, and when another menu opens.
+
 ## [0.6.0] - 2026-10-12
 ### Added
 - **Analysis filters.** Findings can be filtered by severity, **category** (Dependencies, Navigation, Flows, Patches, Publisher, ...), free text, and by the **other solutions they refer to**: a "Solutions" dropdown lists every solution referenced by the findings (with counts) so you can pick which to include, and **Hide Microsoft / system solutions** removes findings that only involve platform solutions (Default, System, Active, Basic, `msdyn_*`, `mscrm*`, `Microsoft*`, ...). Findings that refer to no other solution are always shown. CSV export respects the filters; the system-solution toggle is remembered in the browser.

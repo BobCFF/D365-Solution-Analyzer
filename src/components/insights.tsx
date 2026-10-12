@@ -7,7 +7,7 @@ import type { ParsedSolution } from "@/lib/d365/types";
 import { FlowDiagram } from "./FlowDiagram";
 import { downloadCsv } from "./ui";
 
-export interface DepsPayload { resolved: ResolvedRef[]; counts: Record<string, number>; truncated: boolean }
+export interface DepsPayload { resolved: ResolvedRef[]; counts: Record<string, number>; truncated: boolean; loaded?: string[] }
 
 const STATUS_TEXT: Record<DepStatus, string> = {
   missing: "Missing", other: "In another solution", internal: "In this solution", platform: "Platform (assumed)", unverifiable: "Verify in target",

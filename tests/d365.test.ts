@@ -1,4 +1,7 @@
 import JSZip from "jszip";
+import { parseSolutionRef, typeLabel, buildMissingRows } from "@/lib/d365/missingDeps";
+import { resolveReferences } from "@/lib/d365/dependencies";
+import { activeFilterCount, applyColumnFilters, distinctValues, sortRows, type ColDef } from "@/lib/d365/columnFilter";
 import { categoryOf, filterFindings, isSystemSolution } from "@/lib/d365/findingMeta";
 import { analyzeSelection, compareSets } from "@/lib/d365/comparison";
 import { planImportOrder } from "@/lib/d365/dependencies";
@@ -285,5 +288,52 @@ describe("analysis filters (0.6.0)", () => {
     expect(analyzeSolution(p).find((x) => x.ruleId === "DEP001")?.solutions).toEqual(["BaseSol"]);
     const patch = await parseSolutionZip(await zipOf(solutionXml({ name: "Core_Patch_0a1b2c3d", version: "1.0.1.0" }), custXml([])));
     expect(analyzeSolution(patch).find((x) => x.ruleId === "PAT001")?.solutions).toEqual(["Core"]);
+  });
+});
+
+describe("missing-dependency rows and column filters (0.7.0)", () => {
+  it("parses solution references and component types", () => {
+    expect(parseSolutionRef("Contoso_Core (1.2.0.5)")).toEqual({ name: "Contoso_Core", version: "1.2.0.5" });
+    expect(parseSolutionRef("System")).toEqual({ name: "System", version: "" });
+    expect(typeLabel("1")).toBe("Table (Entity)");
+    expect(typeLabel("Entity")).toBe("Entity");
+  });
+
+  it("keeps structured fields from solution.xml MissingDependencies", async () => {
+    const dep = `<MissingDependency><Required key="account" type="1" displayName="Account" solution="BaseSol (2.0.0.1)" id="{AAAA}" parentDisplayName="P"/><Dependent key="d" type="60" displayName="Main form" parentDisplayName="Widget"/></MissingDependency>`;
+    const p = await parseSolutionZip(await zipOf(solutionXml({ name: "Core", version: "1.0.0.0", extra: dep }), custXml([])));
+    expect(p.missingDependencies[0]).toMatchObject({ requiredSolutionName: "BaseSol", requiredSolutionVersion: "2.0.0.1", requiredParent: "P", dependentParent: "Widget" });
+    expect(analyzeSolution(p).find((x) => x.ruleId === "DEP001")?.solutions).toEqual(["BaseSol"]); // version stripped
+  });
+
+  it("merges platform-reported and scanned rows without duplicates, and marks loaded solutions", async () => {
+    const dep = `<MissingDependency><Required key="con_gadget" type="1" displayName="Gadget" solution="BaseSol (2.0.0.1)"/><Dependent key="d" type="62" displayName="Main › Work › Gadgets"/></MissingDependency>`;
+    const cust = `<ImportExportXml><SiteMap><SiteMap><Area Id="A"><Group Id="G"><SubArea Id="S1" Entity="con_gadget"/><SubArea Id="S2" Entity="con_other"/></Group></Area></SiteMap></SiteMap></ImportExportXml>`;
+    const p = await parseSolutionZip(await zipOf(solutionXml({ name: "Core", version: "1.0.0.0", extra: dep, roots: '<RootComponent type="62" id="{11111111-0000-0000-0000-000000000000}" behavior="0"/>' }), cust));
+    const resolved = resolveReferences(p, []);
+    const rows = buildMissingRows(p, resolved, ["BaseSol"]);
+    expect(rows.filter((r) => r.source === "manifest")).toHaveLength(1);
+    expect(rows.find((r) => r.source === "manifest")).toMatchObject({ requiredName: "Gadget", requiredSolution: "BaseSol", availability: "loaded" });
+    const scanned = rows.filter((r) => r.source === "scan");
+    expect(scanned.map((r) => r.requiredKey)).toEqual(["con_other"]);      // con_gadget already reported by the platform
+    expect(scanned[0]).toMatchObject({ relation: "Navigation item", severity: "error" });
+    expect(buildMissingRows(p, null, null)[0].availability).toBe("unknown");
+  });
+
+  it("filters, sorts and counts by column", () => {
+    type R = { sev: string; name: string; n: number };
+    const rows: R[] = [{ sev: "error", name: "Alpha", n: 2 }, { sev: "warning", name: "beta", n: 10 }, { sev: "error", name: "Gamma", n: 1 }];
+    const cols: ColDef<R>[] = [
+      { key: "sev", label: "Sev", filter: "set", get: (r) => r.sev },
+      { key: "name", label: "Name", filter: "text", get: (r) => r.name },
+      { key: "n", label: "N", filter: "text", get: (r) => String(r.n), sortValue: (r) => r.n },
+    ];
+    expect(applyColumnFilters(rows, cols, { sev: "error" }).map((r) => r.name)).toEqual(["Alpha", "Gamma"]);
+    expect(applyColumnFilters(rows, cols, { name: "AM" }).map((r) => r.name)).toEqual(["Gamma"]);
+    expect(applyColumnFilters(rows, cols, { sev: "error", name: "alp" })).toHaveLength(1);
+    expect(distinctValues(rows, cols[0])).toEqual([["error", 2], ["warning", 1]]);
+    expect(sortRows(rows, cols[2], 1).map((r) => r.n)).toEqual([1, 2, 10]);        // numeric, not lexical
+    expect(sortRows(rows, cols[1], -1).map((r) => r.name)).toEqual(["Gamma", "beta", "Alpha"]);
+    expect(activeFilterCount({ a: "x", b: "" })).toBe(1);
   });
 });

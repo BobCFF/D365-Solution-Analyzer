@@ -60,6 +60,24 @@ export function ThemeCycle() {
   </>);
 }
 
+/** Disclosure popover (<details>) that closes on an outside click, on Esc, and when another menu is opened. */
+export function MenuButton({ label, ariaLabel, small, children }: { label: ReactNode; ariaLabel: string; small?: boolean; children: ReactNode }) {
+  const ref = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const close = (e: Event) => { const d = ref.current; if (d?.open && !d.contains(e.target as Node)) d.open = false; };
+    const esc = (e: KeyboardEvent) => { const d = ref.current; if (e.key === "Escape" && d?.open) { d.open = false; (d.querySelector("summary") as HTMLElement | null)?.focus(); } };
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", esc);
+    return () => { document.removeEventListener("pointerdown", close); document.removeEventListener("keydown", esc); };
+  }, []);
+  return (
+    <details className="multi" ref={ref}>
+      <summary className={`btn ghost${small ? " sm" : ""}`} aria-label={ariaLabel}>{label}</summary>
+      {children}
+    </details>
+  );
+}
+
 /** RFC 4180 CSV with spreadsheet-formula neutralisation (cells starting = + - @ are prefixed). */
 export function toCsv(rows: (string | number | boolean | undefined)[][]): string {
   const cell = (v: string | number | boolean | undefined) => {
