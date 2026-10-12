@@ -230,7 +230,7 @@ details.multi>summary::-webkit-details-marker{display:none}
 .thmenu{background:none;border:1px solid transparent;border-radius:6px;color:var(--muted);cursor:pointer;font-size:16px;line-height:1;padding:0 6px;min-width:28px;min-height:24px}
 .thmenu:hover,.thmenu[aria-expanded=true]{background:var(--surface-3);color:var(--ink)}
 .thmenu.on{color:var(--accent);border-color:var(--accent);font-weight:700}
-.colmenu{position:fixed;z-index:30;width:min(300px,calc(100vw - 16px));max-height:min(70vh,520px);overflow:auto;background:var(--surface);color:var(--ink);border:1px solid var(--field-line);border-radius:10px;padding:10px;box-shadow:var(--shadow)}
+.colmenu{position:fixed;z-index:30;width:min(300px,calc(100vw - 16px));max-height:min(70vh,520px,calc(100vh - 16px));overflow:auto;background:var(--surface);color:var(--ink);border:1px solid var(--field-line);border-radius:10px;padding:10px;box-shadow:var(--shadow)}
 .colmenu hr{border:0;border-top:1px solid var(--border);margin:8px 0}
 .colmenu-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin-bottom:6px}
 .colmenu-actions{display:flex;flex-wrap:wrap;gap:6px}

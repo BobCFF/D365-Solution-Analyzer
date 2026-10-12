@@ -1,17 +1,34 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { analyzeSelection, compareSets, STATUS_LABEL, type CompareRow, type Comparison, type DiffStatus } from "@/lib/d365/comparison";
 import { componentTypeName } from "@/lib/d365/componentTypes";
 import { buildTree, countByType, type Tab } from "@/lib/d365/compareTree";
 import { collectReferences, ck } from "@/lib/d365/dependencies";
 import type { ParsedFlow, ParsedSolution } from "@/lib/d365/types";
 import { FlowDiagram } from "./FlowDiagram";
+import { sortRows } from "@/lib/d365/columnFilter";
+import { asOneOf, asString } from "@/lib/uiStateStore";
+import { ColumnHeader, ColumnMenuLayer, ColumnTable, TableToolbar, useColumnTable, type TableColumn } from "./ColumnTable";
+import { useSavedState } from "./uiState";
 import { downloadCsv } from "./ui";
 import { SolutionPicker, type SolutionRow } from "./views";
 
 type Pane = "summary" | "deps" | "flow";
 const TABS: [Tab, string][] = [["all", "All items"], ["new", "New"], ["different", "Different"], ["deleted", "Deleted"], ["same", "Identical"]];
+
+const COMPARE_COLUMNS: TableColumn<CompareRow>[] = [
+  { key: "name", label: "Name", filter: "text", get: (r) => `${r.name} ${r.key}` },
+  { key: "type", label: "Type", filter: "set", get: (r) => r.typeName },
+  { key: "status", label: "Difference", filter: "set", get: (r) => STATUS_LABEL[r.status], sortValue: (r) => ({ different: 0, new: 1, deleted: 2, same: 3 })[r.status] },
+  { key: "details", label: "Details", filter: "text", get: (r) => r.changes.join(" · ") },
+];
+
+interface ComparePrefs { src: string; tgt: string; tab: Tab; type: number }   // type -1 = all types
+const normalizeCompare = (raw: unknown): ComparePrefs => {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  return { src: asString(r.src), tgt: asString(r.tgt), tab: asOneOf(r.tab, ["all", "new", "different", "deleted", "same"] as const, "all"), type: typeof r.type === "number" ? r.type : -1 };
+};
 
 export function StatusDot({ s }: { s: DiffStatus }) {
   return <span className="dt"><span className={`di ${s}`} aria-hidden="true">{s === "new" ? "+" : s === "deleted" ? "−" : ""}</span>{STATUS_LABEL[s]}</span>;
@@ -25,10 +42,16 @@ export function StatusDot({ s }: { s: DiffStatus }) {
 export function CompareApp({ solutions, load, onLogged }: {
   solutions: SolutionRow[]; load: (id: string) => Promise<ParsedSolution>; onLogged: (leftId: string, rightId: string) => void;
 }) {
-  const [srcId, setSrcId] = useState(""); const [tgtId, setTgtId] = useState("");
+  // remembered per user: the two solutions, the status tab and the type; the table filters/sort/columns are saved by useColumnTable
+  const [prefs, setPrefs] = useSavedState<ComparePrefs>("compare", { src: "", tgt: "", tab: "all", type: -1 }, normalizeCompare);
+  const srcId = prefs.src, tgtId = prefs.tgt, tab = prefs.tab, type = prefs.type === -1 ? null : prefs.type;
+  const setSrcId = (src: string) => setPrefs((p) => ({ ...p, src }));
+  const setTgtId = (tgt: string) => setPrefs((p) => ({ ...p, tgt }));
+  const setTab = (t: Tab) => setPrefs((p) => ({ ...p, tab: t }));
+  const setType = (t: number | null) => setPrefs((p) => ({ ...p, type: t ?? -1 }));
+  const tbl = useColumnTable<CompareRow>("compare", COMPARE_COLUMNS);
   const [pair, setPair] = useState<{ src: ParsedSolution; tgt: ParsedSolution } | null>(null);
   const [err, setErr] = useState(""); const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState<Tab>("all"); const [type, setType] = useState<number | null>(null); const [q, setQ] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [ticked, setTicked] = useState<Set<string>>(new Set());
   const [active, setActive] = useState<string | null>(null);
@@ -42,8 +65,27 @@ export function CompareApp({ solutions, load, onLogged }: {
   };
 
   const cmp: Comparison | null = useMemo(() => (pair ? compareSets(pair.src, pair.tgt) : null), [pair]);
-  const tree = useMemo(() => (cmp ? buildTree(cmp, { tab, type, q, expanded }) : []), [cmp, tab, type, q, expanded]);
-  const typeCounts = useMemo(() => (cmp ? countByType(cmp, tab, q) : new Map<number, number>()), [cmp, tab, q]);
+  // quick search + column filters become a predicate over rows; a column sort becomes an explicit order
+  const pass = useMemo(() => {
+    if (!cmp || tbl.nFilters === 0) return undefined;
+    const ok = new Set(tbl.filter(cmp.rows).map((r) => r.id));
+    return (r: CompareRow) => ok.has(r.id);
+  }, [cmp, tbl.filters, tbl.search]); // eslint-disable-line react-hooks/exhaustive-deps -- tbl.filter closes over these
+  const rank = useMemo(() => {
+    if (!cmp || !tbl.sort) return undefined;
+    return new Map(sortRows(cmp.rows, tbl.byKey.get(tbl.sort.key), tbl.sort.dir).map((r, i) => [r.id, i] as const));
+  }, [cmp, tbl.sort, tbl.byKey]);
+  const tree = useMemo(() => (cmp ? buildTree(cmp, { tab, type, q: "", expanded, pass, rank }) : []), [cmp, tab, type, expanded, pass, rank]);
+  const typeCounts = useMemo(() => (cmp ? countByType(cmp, tab, "", pass) : new Map<number, number>()), [cmp, tab, pass]);
+
+  // restore the last comparison when the page is reopened (once, if both solutions still exist)
+  const restored = useRef(false);
+  useEffect(() => {
+    if (restored.current || pair || !srcId || !tgtId || srcId === tgtId) return;
+    if (!solutions.some((x) => x.id === srcId) || !solutions.some((x) => x.id === tgtId)) return;
+    restored.current = true;
+    void Promise.resolve().then(() => run());   // deferred so state updates happen outside the effect body
+  }); // no dependency array on purpose: re-checks whenever solutions arrive, and `restored` guards the single run
   const report = useMemo(() => (cmp && pair && ticked.size ? analyzeSelection([...ticked], pair.src, pair.tgt, cmp) : null), [cmp, pair, ticked]);
   const activeRow = active && cmp ? cmp.byId.get(active) ?? null : null;
 
@@ -108,11 +150,9 @@ export function CompareApp({ solutions, load, onLogged }: {
         {cmp && pair && (<>
           <div className="toolbar">
             <div className="seg" role="group" aria-label="Difference filter">{TABS.map(([id, label]) => <button key={id} aria-pressed={tab === id} className={tab === id ? "on" : ""} onClick={() => setTab(id)}>{label} {id === "all" ? cmp.rows.length : cmp.counts[id]}</button>)}</div>
-            <input type="search" placeholder="Filter…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Filter" />
-            {(tab !== "all" || type !== null || q) && <button className="btn ghost sm" onClick={() => { setTab("all"); setType(null); setQ(""); }}>Clear filters</button>}
-            <span className="grow" />
-            <button className="btn ghost" onClick={exportResults}>Export results</button>
+            {(tab !== "all" || type !== null) && <button className="btn ghost sm" onClick={() => { setTab("all"); setType(null); }}>Clear tab and type</button>}
           </div>
+          <TableToolbar api={tbl} total={cmp.rows.length} shown={tree.length} onExport={exportResults} />
           <p className="muted" style={{ margin: "0 0 8px" }}>{pair.src.uniqueName} {pair.src.version} <b>→</b> {pair.tgt.uniqueName} {pair.tgt.version}</p>
 
           {ticked.size > 0 && report && (
@@ -135,23 +175,28 @@ export function CompareApp({ solutions, load, onLogged }: {
           )}
 
           <div className="tablewrap gs-grid" tabIndex={0} onKeyDown={onKey} aria-label="Comparison results">
-            <table><thead><tr><th style={{ width: 32 }} /><th>Name</th><th>Type</th><th>Difference</th><th>Details</th></tr></thead>
+            <table className="coltable"><thead><tr><th style={{ width: 32 }} />{tbl.visible.map((c) => <ColumnHeader key={c.key} api={tbl} col={c} />)}</tr></thead>
               <tbody>
                 {tree.map(({ row: r, depth, hasChildren, expanded: open }) => (
                   <tr key={r.id} className={`${r.id === active ? "sel" : ""}`} onClick={() => setActive(r.id)}>
-                    <td><input type="checkbox" checked={ticked.has(r.id)} onChange={() => toggle(r)} onClick={(e) => e.stopPropagation()} aria-label={`Select ${r.name}`} /></td>
-                    <td style={{ paddingLeft: 10 + depth * 22 }}>
+                    <td style={{ paddingLeft: 8 + depth * 22, whiteSpace: "nowrap" }}>
                       {hasChildren ? <button className="caret" aria-label={open ? "Collapse" : "Expand"} onClick={(e) => { e.stopPropagation(); setExpanded((s) => { const n = new Set(s); n.has(r.id) ? n.delete(r.id) : n.add(r.id); return n; }); }}>{open ? "▾" : "▸"}</button> : <span className="caret-sp" />}
-                      <span className="mono">{r.name}</span>{r.name !== r.key && <span className="faint"> {r.key.split("/").pop()}</span>}
+                      <input type="checkbox" checked={ticked.has(r.id)} onChange={() => toggle(r)} onClick={(e) => e.stopPropagation()} aria-label={`Select ${r.name}`} />
                     </td>
-                    <td className="muted">{r.typeName}</td>
-                    <td><StatusDot s={r.status} /></td>
-                    <td className="muted ell">{r.changes.slice(0, 2).join(" · ")}{r.changes.length > 2 ? ` · +${r.changes.length - 2}` : ""}</td>
+                    {tbl.visible.map((c) => (
+                      <td key={c.key} className={c.key === "type" ? "muted" : c.key === "details" ? "muted ell" : undefined}>
+                        {c.key === "name" ? <><span className="mono">{r.name}</span>{r.name !== r.key && <span className="faint"> {r.key.split("/").pop()}</span>}</>
+                          : c.key === "status" ? <StatusDot s={r.status} />
+                          : c.key === "details" ? <>{r.changes.slice(0, 2).join(" · ")}{r.changes.length > 2 ? ` · +${r.changes.length - 2}` : ""}</>
+                          : c.get(r)}
+                      </td>
+                    ))}
                   </tr>
                 ))}
-                {!tree.length && <tr><td colSpan={5} className="muted">Nothing matches these filters.</td></tr>}
+                {!tree.length && <tr><td colSpan={tbl.visible.length + 1} className="muted">Nothing matches these filters.</td></tr>}
               </tbody></table>
           </div>
+          <ColumnMenuLayer api={tbl} rows={cmp.rows} />
 
           {activeRow && (
             <div className="gs-pane">
@@ -187,24 +232,31 @@ function SummaryPane({ row }: { row: CompareRow }) {
   );
 }
 
+interface DepPaneRow { p: { type: number; key: string; name?: string }; kind: string; c?: CompareRow }
+const DEP_PANE_COLUMNS: TableColumn<DepPaneRow>[] = [
+  { key: "component", label: "Component", filter: "text", get: (x) => x.p.name || x.p.key, className: "mono" },
+  { key: "type", label: "Type", filter: "set", get: (x) => componentTypeName(x.p.type), className: "muted" },
+  { key: "relation", label: "Relation", filter: "set", get: (x) => x.kind, className: "muted" },
+  { key: "status", label: "In comparison", filter: "set", get: (x) => (x.c ? STATUS_LABEL[x.c.status] : "Not in either"), render: (x) => (x.c ? <StatusDot s={x.c.status} /> : <span className="muted">Not in either</span>) },
+];
+
 function DepsPane({ row, pair, cmp, ticked, onTick, onOpen }: { row: CompareRow; pair: { src: ParsedSolution; tgt: ParsedSolution }; cmp: Comparison; ticked: Set<string>; onTick: (ids: string[]) => void; onOpen: (id: string) => void }) {
   const refs = useMemo(() => [...collectReferences(pair.src), ...collectReferences(pair.tgt)], [pair]);
   const uses = refs.filter((r) => ck(r.from.type, r.from.key) === row.id);
   const usedBy = refs.filter((r) => ck(r.to.type, r.to.key) === row.id);
   const dedupe = <T extends { kind: string; from: { type: number; key: string }; to: { type: number; key: string } }>(l: T[]) => [...new Map(l.map((r) => [`${r.kind}|${r.from.type}:${r.from.key}|${r.to.type}:${r.to.key}`, r])).values()];
   const needed = dedupe(uses).map((r) => cmp.byId.get(ck(r.to.type, r.to.key))).filter((x): x is CompareRow => !!x && (x.status === "new" || x.status === "different") && !ticked.has(x.id));
-  const table = (title: string, list: typeof refs, side: "to" | "from") => (
-    <div><h2>{title} ({dedupe(list).length})</h2>
-      <div className="tablewrap"><table><thead><tr><th>Component</th><th>Type</th><th>Relation</th><th>In comparison</th></tr></thead><tbody>
-        {dedupe(list).map((r, i) => { const p = r[side]; const c = cmp.byId.get(ck(p.type, p.key)); return (
-          <tr key={i} onClick={() => c && onOpen(c.id)} className={c ? "clickable" : ""}><td className="mono">{("name" in p && (p as { name?: string }).name) || p.key}</td><td className="muted">{componentTypeName(p.type)}</td><td className="muted">{r.kind}</td><td>{c ? <StatusDot s={c.status} /> : <span className="muted">Not in either</span>}</td></tr>); })}
-        {!list.length && <tr><td colSpan={4} className="muted">None found.</td></tr>}
-      </tbody></table></div></div>
-  );
+  const table = (id: string, title: string, list: typeof refs, side: "to" | "from") => {
+    const rows = dedupe(list).map((r) => { const p = r[side]; return { p, kind: r.kind, c: cmp.byId.get(ck(p.type, p.key)) }; });
+    return (<div><h2>{title} ({rows.length})</h2>
+      <ColumnTable id={id} rows={rows} columns={DEP_PANE_COLUMNS} rowKey={(x) => `${x.p.type}:${x.p.key}|${x.kind}`} exportName={`${id}.csv`}
+        onRowClick={(x) => { if (x.c) onOpen(x.c.id); }} rowClass={(x) => (x.c ? "" : "")} empty="None found." />
+    </div>);
+  };
   return (<div className="gs-deps">
     {needed.length > 0 && <div className="row"><button className="btn sm" onClick={() => onTick(needed.map((n) => n.id))}>Tick {needed.length} needed</button><span className="muted">New or different in source and required by this item.</span></div>}
-    {table("Uses", uses, "to")}
-    {table("Used by - what changing or deleting it can affect", usedBy, "from")}
+    {table("compare.uses", "Uses", uses, "to")}
+    {table("compare.usedby", "Used by - what changing or deleting it can affect", usedBy, "from")}
   </div>);
 }
 

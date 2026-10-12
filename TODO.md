@@ -26,13 +26,14 @@ Legend: P0 first, P1 important, P2 nice-to-have.
 - [ ] Compare: saved comparisons, column filters/menus, virtualized rows, 3-way (base) compare, side-by-side XML diff.
 
 ## P2
-- [ ] Use `ColumnTable` for the Data Dictionary, Dependencies and Compare grids (per-column filters everywhere).
+- [ ] Optional cross-device sync of the saved view (sealed, per user) instead of per-browser storage; remember scroll position.
 - [ ] ERD view of a loaded solution (deep-link into D365 ERD Builder or embed).
 - [ ] Group by publisher prefix with colors; relationship category filters.
 - [ ] Table-level security matrix compare across roles; XLSX export.
 - [ ] Accessibility pass (focus trap in dialogs, table semantics).
 
 ## Done
+- [x] 0.9.0 Column menus on all tables; remembered page, selection, filters, sorts and column layouts (per account, per browser).
 - [x] 0.8.0 Column ⋯ menus (sort, multi-select filter, move, hide) and a Columns list with remembered layout.
 - [x] 0.7.0 Missing-dependencies table with per-column filters on the Analysis page; reusable ColumnTable.
 - [x] 0.6.0 Analysis filters: severity, category, search, referenced-solutions dropdown, hide Microsoft/system solutions.

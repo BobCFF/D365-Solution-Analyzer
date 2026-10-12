@@ -2,6 +2,15 @@
 
 All notable changes to this project are recorded here. Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/). The app version lives in `package.json` and is stamped on every in-app audit-log entry.
 
+## [0.9.0] - 2026-10-12
+### Added
+- **Column menus on every table.** The ⋯ header menu (sort, multi-select / contains filter, move left/right, hide), the Columns list, quick search and CSV export now apply to the **Solutions list, Data Dictionary, Dependencies, Security (privileges and field permissions), Change log, the Compare grid** (tree, ticking and the detail pane keep working; filters expand matching parents) and the Compare **Uses / Used by** tables, in addition to the Analysis table. The Dependencies table starts filtered to what needs attention. Tables show up to 2,000 rows (with a note and CSV export for the rest). Extra Data Dictionary columns (primary key, custom, secured, option set, max length) and a Patch parent column are available from the Columns list.
+- **The app remembers where you left off**, per account, in this browser: the last page, the selected solution (reopened on return), the Analysis view and its filters/solution selection, each table's filters, search, sort order and column layout, the Compare pair, tab and type (the comparison re-runs on return), Security role/profile and the selected flow. Corrupt or outdated saved state falls back to defaults, and column layouts repair themselves when columns change between versions.
+- **Reset saved view settings** (Change log tab) and Delete all my data also clear the remembered view. Nothing about the saved view is sent to the server.
+
+### Changed
+- Column menus stay fully on screen on phones (shifted up near the bottom edge).
+
 ## [0.8.0] - 2026-10-12
 ### Changed
 - **Column menus replace the filter row.** Every column header on the Missing dependencies table has a **⋯ menu**: sort A→Z / Z→A, filter, **move left / right** and **hide column**. Set-like columns (Severity, type, solution, availability, ...) filter with a **multi-select value list** (counts, search for long lists, Select all / none); text columns filter with "contains". A filtered column's ⋯ is highlighted, and Clear filter / Clear column filters reset them. Menus are keyboard-operable (Esc closes and returns focus), stay inside the viewport on phones, and do not close while you scroll their value list.

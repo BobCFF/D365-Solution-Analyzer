@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { componentTypeName } from "@/lib/d365/componentTypes";
 import type { DepStatus, ImportPlan, ResolvedRef } from "@/lib/d365/dependencies";
 import type { ParsedSolution } from "@/lib/d365/types";
 import { FlowDiagram } from "./FlowDiagram";
-import { downloadCsv } from "./ui";
+import { ColumnTable, type TableColumn } from "./ColumnTable";
+import { useSavedState } from "./uiState";
 
 export interface DepsPayload { resolved: ResolvedRef[]; counts: Record<string, number>; truncated: boolean; loaded?: string[] }
 
@@ -17,36 +18,28 @@ const STATUS_CLASS: Record<DepStatus, string> = { missing: "error", other: "ok",
 export function StatusChip({ s }: { s: DepStatus }) { return <span className={`chip ${STATUS_CLASS[s]}`}>{STATUS_TEXT[s]}</span>; }
 
 /* ---------------- Dependencies ---------------- */
+const DEP_COLUMNS: TableColumn<ResolvedRef>[] = [
+  { key: "fromType", label: "Component type", filter: "set", defaultVisible: false, get: (r) => componentTypeName(r.ref.from.type) },
+  { key: "from", label: "Component", filter: "text", get: (r) => `${componentTypeName(r.ref.from.type)} ${r.ref.from.name ?? r.ref.from.key}`, render: (r) => <><span className="muted">{componentTypeName(r.ref.from.type)}</span> <span className="mono">{r.ref.from.name ?? r.ref.from.key}</span></> },
+  { key: "relation", label: "Relationship", filter: "set", get: (r) => r.ref.kind, className: "muted" },
+  { key: "toType", label: "Requires (type)", filter: "set", defaultVisible: false, get: (r) => componentTypeName(r.ref.to.type) },
+  { key: "to", label: "Requires", filter: "text", get: (r) => `${componentTypeName(r.ref.to.type)} ${r.ref.to.key}`, render: (r) => <><span className="muted">{componentTypeName(r.ref.to.type)}</span> <span className="mono">{r.ref.to.key}</span></> },
+  { key: "status", label: "Status", filter: "set", get: (r) => STATUS_TEXT[r.status], sortValue: (r) => order(r.status), render: (r) => <StatusChip s={r.status} /> },
+  { key: "providedBy", label: "Provided by", filter: "set", get: (r) => r.providedBy ?? "" },
+  { key: "where", label: "Where", filter: "text", defaultVisible: false, get: (r) => r.ref.detail ?? "" },
+];
+
 export function DependenciesView({ sol, deps, plan }: { sol: ParsedSolution; deps: DepsPayload | null; plan: ImportPlan | null }) {
-  const [filter, setFilter] = useState<"problems" | "all" | DepStatus>("problems");
-  const [q, setQ] = useState("");
-  const rows = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    return (deps?.resolved ?? [])
-      .filter((r) => (filter === "all" ? true : filter === "problems" ? r.status === "missing" || r.status === "unverifiable" : r.status === filter))
-      .filter((r) => !needle || `${r.ref.from.name ?? r.ref.from.key} ${r.ref.to.key} ${r.ref.kind}`.toLowerCase().includes(needle))
-      .sort((a, b) => order(a.status) - order(b.status));
-  }, [deps, filter, q]);
   if (!deps) return <div className="panel empty">Loading dependencies…</div>;
   const c = deps.counts;
   return (<div>
-    <p className="muted">Every reference found in <b>{sol.uniqueName}</b> (navigation, apps, forms, flows, web resources, schema) is checked against this solution and everything else you have loaded. Only components that are clearly custom and absent are flagged <i>Missing</i>; platform components are assumed present.</p>
+    <p className="muted">Every reference found in <b>{sol.uniqueName}</b> (navigation, apps, forms, flows, web resources, schema) is checked against this solution and everything else you have loaded. Only components that are clearly custom and absent are flagged <i>Missing</i>; platform components are assumed present. The table starts filtered to what needs attention; use the ⋯ menu on the <b>Status</b> column to see everything.</p>
     <div className="summary">
       <span className="chip error">{c.missing ?? 0} missing</span><span className="chip warning">{c.unverifiable ?? 0} to verify</span>
       <span className="chip ok">{c.other ?? 0} in other solutions</span><span className="chip ok">{c.internal ?? 0} satisfied here</span><span className="chip info">{c.platform ?? 0} platform</span>
     </div>
-    <div className="toolbar">
-      <div className="seg" role="group" aria-label="Status filter">{(["problems", "missing", "unverifiable", "other", "all"] as const).map((f) => <button key={f} aria-pressed={filter === f} className={filter === f ? "on" : ""} onClick={() => setFilter(f)}>{f === "problems" ? "Needs attention" : f === "all" ? "All" : STATUS_TEXT[f]}</button>)}</div>
-      <input type="search" placeholder="Filter…" value={q} onChange={(e) => setQ(e.target.value)} /><span className="grow" />
-      <button className="btn ghost" onClick={() => downloadCsv(`${sol.uniqueName}-dependencies.csv`, [["From type", "From", "Relation", "To type", "To", "Status", "Provided by", "Where"], ...rows.map((r) => [componentTypeName(r.ref.from.type), r.ref.from.name ?? r.ref.from.key, r.ref.kind, componentTypeName(r.ref.to.type), r.ref.to.key, STATUS_TEXT[r.status], r.providedBy ?? "", r.ref.detail ?? ""])])}>Export CSV</button>
-    </div>
-    <div className="tablewrap"><table><thead><tr><th>Component</th><th>Relation</th><th>Requires</th><th>Status</th></tr></thead><tbody>
-      {rows.slice(0, 1500).map((r, i) => (
-        <tr key={i}><td><span className="muted">{componentTypeName(r.ref.from.type)}</span> <span className="mono">{r.ref.from.name ?? r.ref.from.key}</span></td><td className="muted">{r.ref.kind}</td>
-          <td><span className="muted">{componentTypeName(r.ref.to.type)}</span> <span className="mono">{r.ref.to.key}</span></td><td><StatusChip s={r.status} />{r.providedBy && <span className="muted"> {r.providedBy}</span>}</td></tr>
-      ))}
-      {!rows.length && <tr><td colSpan={4} className="muted">{filter === "problems" ? "No missing or unverified dependencies." : "Nothing in this view."}</td></tr>}
-    </tbody></table></div>
+    <ColumnTable id="deps" rows={deps.resolved} columns={DEP_COLUMNS} rowKey={(r) => `${r.ref.from.type}:${r.ref.from.key}|${r.ref.kind}|${r.ref.to.type}:${r.ref.to.key}|${r.ref.detail ?? ""}`} exportName={`${sol.uniqueName}-dependencies.csv`}
+      initialFilters={{ status: [STATUS_TEXT.missing, STATUS_TEXT.unverifiable] }} initialSort={{ key: "status", dir: 1 }} empty="No dependencies found." />
     {deps.truncated && <p className="muted">Showing the first 5,000 references.</p>}
 
     <h2 style={{ marginTop: 24 }}>Suggested import order (all loaded solutions)</h2>
@@ -111,7 +104,7 @@ const countTypes = (c: { type: number }[]) => Object.entries(c.reduce<Record<num
 /* ---------------- Flows ---------------- */
 export function FlowsView({ sol, deps }: { sol: ParsedSolution; deps: DepsPayload | null }) {
   const flows = sol.flows ?? [];
-  const [id, setId] = useState(flows[0]?.id ?? "");
+  const [id, setId] = useSavedState<string>("flows.selected", "", (r) => (typeof r === "string" ? r : ""));
   const flow = flows.find((f) => f.id === id) ?? flows[0];
   if (!flows.length) return <div className="panel empty">No cloud flow definitions in this package. Flows are read from <code>Workflows/*.json</code>; export the solution with its flows included.</div>;
   const problems = (deps?.resolved ?? []).filter((r) => r.ref.from.type === 29 && r.ref.from.key === flow.id && r.status === "missing");

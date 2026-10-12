@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
-  activeFilterCount, applyColumnFilters, defaultLayout, distinctValues, isFilterActive, moveColumn, normalizeLayout, sortRows, toggleSetValue,
-  type ColDef, type ColumnFilters, type ColumnLayout,
+  activeFilterCount, applyColumnFilters, defaultLayout, distinctValues, isFilterActive, matchesSearch, moveColumn, normalizeLayout, normalizeTableState,
+  sortRows, toggleSetValue, type ColDef, type ColumnFilters, type ColumnLayout, type SortState, type TableState,
 } from "@/lib/d365/columnFilter";
+import { useSavedState } from "./uiState";
 import { downloadCsv, MenuButton } from "./ui";
 
 export interface TableColumn<T> extends ColDef<T> {
@@ -13,137 +14,182 @@ export interface TableColumn<T> extends ColDef<T> {
   className?: string;
 }
 
-const storageKey = (id: string) => `d365-sa-cols-v2-${id}`;
-function loadLayout(id: string, cols: { key: string; defaultVisible?: boolean }[]): ColumnLayout {
-  try { const raw = localStorage.getItem(storageKey(id)); if (raw) return normalizeLayout(JSON.parse(raw) as Partial<ColumnLayout>, cols); } catch { /* storage unavailable or corrupt */ }
-  return defaultLayout(cols);
-}
+const MAX_ROWS = 2000;
 
 /**
- * Table with a ⋯ menu on every column header (sort, filter, move left/right, hide), a Columns list to choose which
- * columns are included (and their order), and CSV export of what you see. Layout is remembered per table.
+ * State + behaviour shared by every table: filters, sort, quick search, column layout (order/visibility), and the open
+ * header menu. All of it is remembered per user (see uiState) under `table:<id>`.
  */
-export function ColumnTable<T>({ id, rows, columns, rowKey, exportName, rowClass, empty }: {
-  id: string; rows: T[]; columns: TableColumn<T>[]; rowKey: (r: T) => string; exportName: string; rowClass?: (r: T) => string; empty?: ReactNode;
-}) {
-  const [filters, setFilters] = useState<ColumnFilters>({});
-  const [sort, setSort] = useState<{ key: string; dir: 1 | -1 } | null>(null);
-  const [layout, setLayout] = useState<ColumnLayout>(() => loadLayout(id, columns));
-  const [menu, setMenu] = useState<{ key: string; x: number; y: number } | null>(null);
-  const [valueSearch, setValueSearch] = useState("");
-  const menuRef = useRef<HTMLDivElement>(null);
-  const opener = useRef<HTMLElement | null>(null);
-
-  const byKey = useMemo(() => new Map(columns.map((c) => [c.key, c])), [columns]);
+export function useColumnTable<T>(id: string, columns: TableColumn<T>[], opts: { initialFilters?: ColumnFilters; initialSort?: SortState | null } = {}) {
+  const fallback: TableState = { filters: opts.initialFilters ?? {}, sort: opts.initialSort ?? null, layout: null, search: "" };
+  const [state, setState] = useSavedState<TableState>(`table:${id}`, fallback, (raw) => normalizeTableState(raw, columns, fallback));
+  const layout: ColumnLayout = useMemo(() => normalizeLayout(state.layout ?? defaultLayout(columns), columns), [state.layout, columns]);
   const hidden = useMemo(() => new Set(layout.hidden), [layout.hidden]);
+  const byKey = useMemo(() => new Map(columns.map((c) => [c.key, c])), [columns]);
   const visible = layout.order.map((k) => byKey.get(k)).filter((c): c is TableColumn<T> => !!c && !hidden.has(c.key));
 
-  const filtered = useMemo(() => applyColumnFilters(rows, columns, filters), [rows, columns, filters]);
-  const shown = useMemo(() => sortRows(filtered, byKey.get(sort?.key ?? ""), sort?.dir ?? 1), [filtered, byKey, sort]);
-  const nFilters = activeFilterCount(filters);
+  const [menu, setMenu] = useState<{ key: string; x: number; y: number } | null>(null);
+  const opener = useRef<HTMLElement | null>(null);
 
-  const saveLayout = (next: ColumnLayout) => {
-    setLayout(next);
-    try { localStorage.setItem(storageKey(id), JSON.stringify(next)); } catch { /* storage unavailable */ }
+  const api = {
+    id, columns, byKey, visible, layout, hidden, menu, opener,
+    filters: state.filters, sort: state.sort, search: state.search,
+    setFilters: (f: ColumnFilters | ((p: ColumnFilters) => ColumnFilters)) => setState((s) => ({ ...s, filters: typeof f === "function" ? f(s.filters) : f })),
+    setSort: (v: SortState | null | ((p: SortState | null) => SortState | null)) => setState((s) => ({ ...s, sort: typeof v === "function" ? v(s.sort) : v })),
+    setSearch: (search: string) => setState((s) => ({ ...s, search })),
+    saveLayout: (l: ColumnLayout) => setState((s) => ({ ...s, layout: l })),
+    toggleCol: (key: string) => setState((s) => { const l = normalizeLayout(s.layout ?? defaultLayout(columns), columns); const h = new Set(l.hidden); if (h.has(key)) h.delete(key); else h.add(key); return { ...s, layout: { order: l.order, hidden: [...h] } }; }),
+    closeMenu: (restoreFocus = true) => { setMenu(null); if (restoreFocus) opener.current?.focus(); },
+    openMenu: (key: string, el: HTMLElement) => {
+      if (menu?.key === key) { setMenu(null); opener.current?.focus(); return; }
+      opener.current = el;
+      const r = el.getBoundingClientRect();
+      const width = Math.min(300, window.innerWidth - 16);
+      setMenu({ key, x: Math.max(8, Math.min(r.left, window.innerWidth - width - 8)), y: r.bottom + 4 });
+    },
+    /** search + column filters (no sort), for callers that sort or nest rows themselves */
+    filter: (rows: T[]) => applyColumnFilters(rows.filter((r) => matchesSearch(r, columns, state.search)), columns, state.filters),
+    process: (rows: T[]) => sortRows(applyColumnFilters(rows.filter((r) => matchesSearch(r, columns, state.search)), columns, state.filters), byKey.get(state.sort?.key ?? ""), state.sort?.dir ?? 1),
+    clearAll: () => setState((s) => ({ ...s, filters: {}, search: "" })),
+    nFilters: activeFilterCount(state.filters) + (state.search.trim() ? 1 : 0),
   };
-  const toggleCol = (key: string) => saveLayout({ order: layout.order, hidden: hidden.has(key) ? layout.hidden.filter((k) => k !== key) : [...layout.hidden, key] });
-  const closeMenu = (restoreFocus = true) => { setMenu(null); setValueSearch(""); if (restoreFocus) opener.current?.focus(); };
+  return api;
+}
+export type ColumnTableApi<T> = ReturnType<typeof useColumnTable<T>>;
 
-  const openMenu = (key: string, el: HTMLElement) => {
-    if (menu?.key === key) { closeMenu(); return; }
-    opener.current = el;
-    const r = el.getBoundingClientRect();
-    const width = Math.min(300, window.innerWidth - 16);
-    setValueSearch("");
-    setMenu({ key, x: Math.max(8, Math.min(r.left, window.innerWidth - width - 8)), y: r.bottom + 4 });
-  };
+/** A header cell: sort button + ⋯ column menu trigger. */
+export function ColumnHeader<T>({ api, col }: { api: ColumnTableApi<T>; col: TableColumn<T> }) {
+  const on = isFilterActive(api.filters[col.key]);
+  const sorted = api.sort?.key === col.key ? api.sort.dir : 0;
+  return (
+    <th aria-sort={sorted === 1 ? "ascending" : sorted === -1 ? "descending" : "none"}>
+      <div className="thwrap">
+        <button className="thbtn" onClick={() => api.setSort((s) => (s?.key === col.key ? (s.dir === 1 ? { key: col.key, dir: -1 } : null) : { key: col.key, dir: 1 }))}>{col.label}{sorted === 1 ? " ▲" : sorted === -1 ? " ▼" : ""}</button>
+        <button className={`thmenu${on ? " on" : ""}`} aria-haspopup="menu" aria-expanded={api.menu?.key === col.key}
+          aria-label={`${col.label} column options${on ? " (filtered)" : ""}`} onClick={(e) => api.openMenu(col.key, e.currentTarget)}>⋯</button>
+      </div>
+    </th>
+  );
+}
 
-  // close on outside pointer, Esc and resize (not on scroll: scrolling the value list or the browser scrolling a focused input into view must not close it); focus moves into the menu when it opens
+/** The open column menu (sort, filter, move, hide). Render once per table, after the table. `rows` supplies the distinct values. */
+export function ColumnMenuLayer<T>({ api, rows }: { api: ColumnTableApi<T>; rows: T[] }) {
+  const { menu } = api;
+  const ref = useRef<HTMLDivElement>(null);
+  const [valueSearch, setValueSearch] = useState("");
+  const col = menu ? api.byKey.get(menu.key) : undefined;
+
+  // close on outside pointer, Esc and resize (not scroll: scrolling the value list, or the browser scrolling a focused input into view, must not close it)
   useEffect(() => {
     if (!menu) return;
-    const out = (e: Event) => { const t = e.target as Node; if (!menuRef.current?.contains(t) && !opener.current?.contains(t)) setMenu(null); };
-    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") { setMenu(null); setValueSearch(""); opener.current?.focus(); } };
-    const away = () => setMenu(null);
-    document.addEventListener("pointerdown", out); document.addEventListener("keydown", esc);
-    window.addEventListener("resize", away);
-    menuRef.current?.querySelector<HTMLElement>("button:not(:disabled), input")?.focus();
+    const out = (e: Event) => { const t = e.target as Node; if (!ref.current?.contains(t) && !api.opener.current?.contains(t)) api.closeMenu(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") api.closeMenu(true); };
+    const away = () => api.closeMenu(false);
+    document.addEventListener("pointerdown", out); document.addEventListener("keydown", esc); window.addEventListener("resize", away);
+    ref.current?.querySelector<HTMLElement>("button:not(:disabled), input")?.focus();
     return () => { document.removeEventListener("pointerdown", out); document.removeEventListener("keydown", esc); window.removeEventListener("resize", away); };
   }, [menu?.key]); // eslint-disable-line react-hooks/exhaustive-deps -- re-run only when a different menu opens
 
-  const col = menu ? byKey.get(menu.key) : undefined;
-  const values = useMemo(() => (col?.filter === "set" ? distinctValues(rows, col) : []), [col, rows]);
-  const vIndex = col ? visible.findIndex((c) => c.key === col.key) : -1;
+  // keep the whole menu on screen: shift it up when it would run past the bottom edge (headers can sit near the fold on phones)
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!menu || !el) return;
+    const r = el.getBoundingClientRect();
+    if (r.bottom > window.innerHeight - 8) el.style.top = `${Math.max(8, window.innerHeight - r.height - 8)}px`;
+  }, [menu, valueSearch]);
 
-  return (<div>
+  const values = useMemo(() => (col?.filter === "set" ? distinctValues(rows, col) : []), [col, rows]);
+  if (!menu || !col) return null;
+  const vIndex = api.visible.findIndex((c) => c.key === col.key);
+  const f = api.filters[col.key];
+  const setFilter = (v: string | string[] | undefined) => api.setFilters((cur) => { const o = { ...cur }; if (v === undefined) delete o[col.key]; else o[col.key] = v; return o; });
+
+  return (
+    <div ref={ref} className="colmenu" role="dialog" aria-label={`${col.label} column options`} style={{ left: menu.x, top: menu.y } as CSSProperties}>
+      <div className="colmenu-title">{col.label}</div>
+      <div className="colmenu-actions">
+        <button className="btn ghost sm" onClick={() => { api.setSort({ key: col.key, dir: 1 }); api.closeMenu(); }}>Sort A → Z</button>
+        <button className="btn ghost sm" onClick={() => { api.setSort({ key: col.key, dir: -1 }); api.closeMenu(); }}>Sort Z → A</button>
+        {api.sort?.key === col.key && <button className="btn ghost sm" onClick={() => { api.setSort(null); api.closeMenu(); }}>Clear sort</button>}
+      </div>
+      <hr />
+      <div className="colmenu-title">Filter</div>
+      {col.filter === "text" ? (
+        <input type="search" aria-label={`Filter ${col.label} contains`} placeholder="Contains…" value={typeof f === "string" ? f : ""} onChange={(e) => setFilter(e.target.value)} />
+      ) : (<>
+        {values.length > 8 && <input type="search" aria-label="Search values" placeholder="Search values…" value={valueSearch} onChange={(e) => setValueSearch(e.target.value)} />}
+        <div className="row" style={{ margin: "6px 0" }}>
+          <button className="btn ghost sm" onClick={() => setFilter(undefined)}>Select all</button>
+          <button className="btn ghost sm" onClick={() => setFilter([])}>Select none</button>
+        </div>
+        <ul className="colmenu-values">{values.filter(([v]) => v.toLowerCase().includes(valueSearch.toLowerCase())).map(([v, n]) => {
+          const on = f === undefined || f === "" ? true : Array.isArray(f) ? f.includes(v) : f === v;
+          return (<li key={v}><label className="row"><input type="checkbox" checked={on} onChange={() => setFilter(toggleSetValue(f, v, values.map(([x]) => x)))} /> <span>{v}</span> <span className="pill">{n}</span></label></li>);
+        })}</ul>
+      </>)}
+      {isFilterActive(f) && <button className="btn ghost sm" style={{ marginTop: 6 }} onClick={() => setFilter(undefined)}>Clear filter</button>}
+      <hr />
+      <div className="colmenu-actions">
+        <button className="btn ghost sm" disabled={vIndex <= 0} onClick={() => api.saveLayout(moveColumn(api.layout, col.key, -1))}>← Move left</button>
+        <button className="btn ghost sm" disabled={vIndex < 0 || vIndex >= api.visible.length - 1} onClick={() => api.saveLayout(moveColumn(api.layout, col.key, 1))}>Move right →</button>
+        <button className="btn ghost sm" disabled={api.visible.length === 1} onClick={() => { api.toggleCol(col.key); api.closeMenu(false); }}>Hide column</button>
+      </div>
+    </div>
+  );
+}
+
+/** Toolbar: count, quick search, Clear filters, Columns list (which columns to include), CSV export. */
+export function TableToolbar<T>({ api, total, shown, onExport, extra }: { api: ColumnTableApi<T>; total: number; shown: number; onExport?: () => void; extra?: ReactNode }) {
+  const { layout, hidden, byKey, visible, columns } = api;
+  return (
     <div className="toolbar">
-      <span className="muted" role="status">{shown.length} of {rows.length} row(s){nFilters ? ` · ${nFilters} column filter(s)` : ""}</span>
+      <input type="search" aria-label="Search this table" placeholder="Search…" value={api.search} onChange={(e) => api.setSearch(e.target.value)} />
+      <span className="muted" role="status">{shown} of {total} row(s){api.nFilters ? ` · ${api.nFilters} filter(s)` : ""}</span>
       <span className="grow" />
-      {nFilters > 0 && <button className="btn ghost sm" onClick={() => setFilters({})}>Clear column filters</button>}
+      {extra}
+      {api.nFilters > 0 && <button className="btn ghost sm" onClick={api.clearAll}>Clear filters</button>}
       <MenuButton small ariaLabel="Choose columns" label={<>Columns ({visible.length}/{columns.length})</>}>
         <div className="multi-pop" role="group" aria-label="Columns to include">
           <p className="faint" style={{ margin: "0 0 6px" }}>Tick the columns to include. Use ⋯ on a header to move or hide one.</p>
-          <div className="row"><button className="btn ghost sm" onClick={() => saveLayout({ order: layout.order, hidden: [] })}>Show all</button><button className="btn ghost sm" onClick={() => saveLayout(defaultLayout(columns))}>Reset</button></div>
+          <div className="row"><button className="btn ghost sm" onClick={() => api.saveLayout({ order: layout.order, hidden: [] })}>Show all</button><button className="btn ghost sm" onClick={() => api.saveLayout(defaultLayout(columns))}>Reset</button></div>
           <ul>{layout.order.map((k) => byKey.get(k)).filter((c): c is TableColumn<T> => !!c).map((c) => (
-            <li key={c.key}><label className="row"><input type="checkbox" checked={!hidden.has(c.key)} disabled={!hidden.has(c.key) && visible.length === 1} onChange={() => toggleCol(c.key)} /> {c.label}</label></li>
+            <li key={c.key}><label className="row"><input type="checkbox" checked={!hidden.has(c.key)} disabled={!hidden.has(c.key) && visible.length === 1} onChange={() => api.toggleCol(c.key)} /> {c.label}</label></li>
           ))}</ul>
         </div>
       </MenuButton>
-      <button className="btn ghost sm" disabled={!shown.length} onClick={() => downloadCsv(exportName, [visible.map((c) => c.label), ...shown.map((r) => visible.map((c) => c.get(r)))])}>Export CSV</button>
+      {onExport && <button className="btn ghost sm" disabled={!shown} onClick={onExport}>Export CSV</button>}
     </div>
+  );
+}
 
+/**
+ * Flat table with a ⋯ menu on every column header, a Columns list, quick search and CSV export. Filters, sort, search and
+ * the column layout are remembered per user.
+ */
+export function ColumnTable<T>({ id, rows, columns, rowKey, exportName, rowClass, empty, initialFilters, initialSort, onRowClick, rowActions, actionsLabel }: {
+  id: string; rows: T[]; columns: TableColumn<T>[]; rowKey: (r: T) => string; exportName: string; rowClass?: (r: T) => string; empty?: ReactNode;
+  initialFilters?: ColumnFilters; initialSort?: SortState | null; onRowClick?: (r: T) => void; rowActions?: (r: T) => ReactNode; actionsLabel?: string;
+}) {
+  const api = useColumnTable(id, columns, { initialFilters, initialSort });
+  const shown = useMemo(() => api.process(rows), [rows, api.filters, api.sort, api.search, api.layout]); // eslint-disable-line react-hooks/exhaustive-deps -- process closes over these
+  const capped = shown.slice(0, MAX_ROWS);
+  const colSpan = api.visible.length + (rowActions ? 1 : 0);
+
+  return (<div>
+    <TableToolbar api={api} total={rows.length} shown={shown.length} onExport={() => downloadCsv(exportName, [api.visible.map((c) => c.label), ...shown.map((r) => api.visible.map((c) => c.get(r)))])} />
     <div className="tablewrap"><table className="coltable">
-      <thead><tr>{visible.map((c) => {
-        const filteredHere = isFilterActive(filters[c.key]);
-        return (
-          <th key={c.key} aria-sort={sort?.key === c.key ? (sort.dir === 1 ? "ascending" : "descending") : "none"}>
-            <div className="thwrap">
-              <button className="thbtn" onClick={() => setSort((s) => (s?.key === c.key ? (s.dir === 1 ? { key: c.key, dir: -1 } : null) : { key: c.key, dir: 1 }))}>{c.label}{sort?.key === c.key ? (sort.dir === 1 ? " ▲" : " ▼") : ""}</button>
-              <button className={`thmenu${filteredHere ? " on" : ""}`} aria-haspopup="menu" aria-expanded={menu?.key === c.key}
-                aria-label={`${c.label} column options${filteredHere ? " (filtered)" : ""}`} onClick={(e) => openMenu(c.key, e.currentTarget)}>⋯</button>
-            </div>
-          </th>);
-      })}</tr></thead>
+      <thead><tr>{api.visible.map((c) => <ColumnHeader key={c.key} api={api} col={c} />)}{rowActions && <th>{actionsLabel ?? ""}</th>}</tr></thead>
       <tbody>
-        {shown.map((r) => <tr key={rowKey(r)} className={rowClass?.(r)}>{visible.map((c) => <td key={c.key} className={c.className}>{c.render ? c.render(r) : c.get(r)}</td>)}</tr>)}
-        {!shown.length && <tr><td colSpan={visible.length} className="muted">{rows.length ? "No rows match the column filters." : empty ?? "Nothing to show."}</td></tr>}
+        {capped.map((r) => (
+          <tr key={rowKey(r)} className={`${rowClass?.(r) ?? ""}${onRowClick ? " clickable" : ""}`} onClick={onRowClick ? () => onRowClick(r) : undefined}>
+            {api.visible.map((c) => <td key={c.key} className={c.className}>{c.render ? c.render(r) : c.get(r)}</td>)}
+            {rowActions && <td onClick={(e) => e.stopPropagation()}>{rowActions(r)}</td>}
+          </tr>
+        ))}
+        {!capped.length && <tr><td colSpan={colSpan} className="muted">{rows.length ? "No rows match the filters." : empty ?? "Nothing to show."}</td></tr>}
       </tbody>
     </table></div>
-
-    {menu && col && (
-      <div ref={menuRef} className="colmenu" role="dialog" aria-label={`${col.label} column options`} style={{ left: menu.x, top: menu.y } as CSSProperties}>
-        <div className="colmenu-title">{col.label}</div>
-        <div className="colmenu-actions">
-          <button className="btn ghost sm" onClick={() => { setSort({ key: col.key, dir: 1 }); closeMenu(); }}>Sort A → Z</button>
-          <button className="btn ghost sm" onClick={() => { setSort({ key: col.key, dir: -1 }); closeMenu(); }}>Sort Z → A</button>
-          {sort?.key === col.key && <button className="btn ghost sm" onClick={() => { setSort(null); closeMenu(); }}>Clear sort</button>}
-        </div>
-        <hr />
-        <div className="colmenu-title">Filter</div>
-        {col.filter === "text" ? (
-          <input type="search" aria-label={`Filter ${col.label} contains`} placeholder="Contains…" value={typeof filters[col.key] === "string" ? (filters[col.key] as string) : ""}
-            onChange={(e) => setFilters((f) => ({ ...f, [col.key]: e.target.value }))} />
-        ) : (<>
-          {values.length > 8 && <input type="search" aria-label="Search values" placeholder="Search values…" value={valueSearch} onChange={(e) => setValueSearch(e.target.value)} />}
-          <div className="row" style={{ margin: "6px 0" }}>
-            <button className="btn ghost sm" onClick={() => setFilters((f) => { const n = { ...f }; delete n[col.key]; return n; })}>Select all</button>
-            <button className="btn ghost sm" onClick={() => setFilters((f) => ({ ...f, [col.key]: [] }))}>Select none</button>
-          </div>
-          <ul className="colmenu-values">{values.filter(([v]) => v.toLowerCase().includes(valueSearch.toLowerCase())).map(([v, n]) => {
-            const f = filters[col.key];
-            const on = f === undefined || f === "" ? true : Array.isArray(f) ? f.includes(v) : f === v;
-            return (<li key={v}><label className="row"><input type="checkbox" checked={on} onChange={() => setFilters((cur) => {
-              const next = toggleSetValue(cur[col.key], v, values.map(([x]) => x)); const o = { ...cur };
-              if (next === undefined) delete o[col.key]; else o[col.key] = next; return o; })} /> <span>{v}</span> <span className="pill">{n}</span></label></li>);
-          })}</ul>
-        </>)}
-        {isFilterActive(filters[col.key]) && <button className="btn ghost sm" style={{ marginTop: 6 }} onClick={() => setFilters((f) => { const n = { ...f }; delete n[col.key]; return n; })}>Clear filter</button>}
-        <hr />
-        <div className="colmenu-actions">
-          <button className="btn ghost sm" disabled={vIndex <= 0} onClick={() => saveLayout(moveColumn(layout, col.key, -1))}>← Move left</button>
-          <button className="btn ghost sm" disabled={vIndex < 0 || vIndex >= visible.length - 1} onClick={() => saveLayout(moveColumn(layout, col.key, 1))}>Move right →</button>
-          <button className="btn ghost sm" disabled={visible.length === 1} onClick={() => { toggleCol(col.key); closeMenu(false); }}>Hide column</button>
-        </div>
-      </div>
-    )}
+    {shown.length > MAX_ROWS && <p className="muted">Showing the first {MAX_ROWS.toLocaleString()} of {shown.length.toLocaleString()} rows; narrow the filters or export CSV for all.</p>}
+    <ColumnMenuLayer api={api} rows={rows} />
   </div>);
 }
