@@ -87,3 +87,32 @@ export function moveColumn(layout: ColumnLayout, key: string, dir: -1 | 1): Colu
   order.splice(dir === 1 ? at + 1 : at, 0, key);
   return { order, hidden: layout.hidden };
 }
+
+/* ---- saved per-table state ---- */
+export interface SortState { key: string; dir: 1 | -1 }
+export interface TableState { filters: ColumnFilters; sort: SortState | null; layout: ColumnLayout | null; search: string }
+
+/** Validate saved table state against the current columns (unknown columns, bad shapes and stale layouts are repaired or dropped). */
+export function normalizeTableState(raw: unknown, cols: { key: string; defaultVisible?: boolean }[], fallback: TableState): TableState {
+  if (!raw || typeof raw !== "object") return fallback;
+  const r = raw as Partial<Record<keyof TableState, unknown>>;
+  const keys = new Set(cols.map((c) => c.key));
+  const filters: ColumnFilters = {};
+  if (r.filters && typeof r.filters === "object" && !Array.isArray(r.filters)) {
+    for (const [k, v] of Object.entries(r.filters as Record<string, unknown>)) {
+      if (!keys.has(k)) continue;
+      if (typeof v === "string") filters[k] = v.slice(0, 500);
+      else if (Array.isArray(v)) filters[k] = v.filter((x): x is string => typeof x === "string").slice(0, 500);
+    }
+  }
+  const s = r.sort as Partial<SortState> | null | undefined;
+  const sort = s && typeof s.key === "string" && keys.has(s.key) && (s.dir === 1 || s.dir === -1) ? { key: s.key, dir: s.dir } : null;
+  const layout = r.layout && typeof r.layout === "object" ? normalizeLayout(r.layout as Partial<ColumnLayout>, cols) : null;
+  return { filters, sort, layout, search: typeof r.search === "string" ? r.search.slice(0, 500) : "" };
+}
+
+/** Quick search: every column's text, case-insensitive. */
+export function matchesSearch<T>(row: T, cols: ColDef<T>[], needle: string): boolean {
+  const n = needle.trim().toLowerCase();
+  return !n || cols.some((c) => c.get(row).toLowerCase().includes(n));
+}

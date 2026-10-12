@@ -1,4 +1,5 @@
 import JSZip from "jszip";
+import { matchesSearch, normalizeTableState } from "@/lib/d365/columnFilter";
 import { defaultLayout, moveColumn, normalizeLayout, toggleSetValue } from "@/lib/d365/columnFilter";
 import { parseSolutionRef, typeLabel, buildMissingRows } from "@/lib/d365/missingDeps";
 import { resolveReferences } from "@/lib/d365/dependencies";
@@ -377,5 +378,27 @@ describe("column menu logic (0.8.0)", () => {
     expect(moveColumn(l, "a", -1)).toEqual(l);                              // already first
     expect(moveColumn(l, "d", 1)).toEqual(l);                               // already last
     expect(moveColumn(l, "b", 1)).toEqual(l);                               // hidden columns do not move
+  });
+});
+
+describe("saved table state (0.9.0)", () => {
+  const cols = [{ key: "a" }, { key: "b", defaultVisible: false }, { key: "c" }];
+  const fb = { filters: {}, sort: null, layout: null, search: "" };
+  it("keeps valid state and repairs the rest", () => {
+    const ok = normalizeTableState({ filters: { a: ["x"], c: "abc", zzz: "gone" }, sort: { key: "c", dir: -1 }, layout: { order: ["c", "a"], hidden: ["a"] }, search: "hi" }, cols, fb);
+    expect(ok.filters).toEqual({ a: ["x"], c: "abc" });                     // unknown column dropped
+    expect(ok.sort).toEqual({ key: "c", dir: -1 });
+    expect(ok.layout).toEqual({ order: ["c", "a", "b"], hidden: ["a", "b"] }); // new column b appended with its default visibility
+    expect(ok.search).toBe("hi");
+  });
+  it("falls back for junk and for sorts on removed columns", () => {
+    expect(normalizeTableState("junk", cols, fb)).toBe(fb);
+    expect(normalizeTableState(null, cols, fb)).toBe(fb);
+    expect(normalizeTableState({ sort: { key: "removed", dir: 1 }, filters: [1, 2] }, cols, fb)).toEqual({ filters: {}, sort: null, layout: null, search: "" });
+  });
+  it("matches the quick search against every column", () => {
+    const row = { a: "Alpha", b: "Beta" };
+    const c2: ColDef<typeof row>[] = [{ key: "a", label: "A", filter: "text", get: (r) => r.a }, { key: "b", label: "B", filter: "text", get: (r) => r.b }];
+    expect(matchesSearch(row, c2, "BET")).toBe(true); expect(matchesSearch(row, c2, "zzz")).toBe(false); expect(matchesSearch(row, c2, "  ")).toBe(true);
   });
 });

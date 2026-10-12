@@ -1,13 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { AccessLevel, ParsedSolution } from "@/lib/d365/types";
-import { useEffect } from "react";
 import type { Api } from "@/lib/api-client";
 import { errMsg } from "@/lib/api-client";
 import { categoryOf, filterFindings, isSystemSolution } from "@/lib/d365/findingMeta";
 import { ColumnTable, type TableColumn } from "./ColumnTable";
 import type { MissingRow } from "@/lib/d365/missingDeps";
+import { asBool, asOneOf, asString, asStringArray } from "@/lib/uiStateStore";
+import { useSavedState } from "./uiState";
 import { downloadCsv, MenuButton, SEV_ORDER } from "./ui";
 
 export interface SolutionRow { id: string; unique_name: string; friendly_name: string; version: string; managed: boolean; parent_solution_name: string | null; file_name: string; created_at: string }
@@ -25,29 +26,35 @@ export function SolutionPicker({ solutions, value, onChange }: { solutions: Solu
   );
 }
 
+const typeOf = (s: SolutionRow) => `${s.managed ? "Managed" : "Unmanaged"}${s.parent_solution_name ? " patch" : ""}`;
+const SOLUTION_COLUMNS: TableColumn<SolutionRow>[] = [
+  { key: "solution", label: "Solution", filter: "text", get: (s) => `${s.friendly_name} ${s.unique_name}`, render: (s) => <>{s.friendly_name}<div className="muted mono">{s.unique_name}</div></> },
+  { key: "version", label: "Version", filter: "set", get: (s) => s.version, className: "mono" },
+  { key: "type", label: "Type", filter: "set", get: typeOf, render: (s) => <>{typeOf(s)}{s.parent_solution_name && <div className="muted">of {s.parent_solution_name}</div>}</> },
+  { key: "parent", label: "Patch parent", filter: "set", defaultVisible: false, get: (s) => s.parent_solution_name ?? "" },
+  { key: "file", label: "File", filter: "text", get: (s) => s.file_name, className: "muted" },
+  { key: "loaded", label: "Loaded", filter: "text", get: (s) => new Date(s.created_at).toLocaleString(), sortValue: (s) => s.created_at, className: "muted" },
+];
+
 export function SolutionsView({ solutions, selected, onSelect, onDelete }: {
   solutions: SolutionRow[]; selected: string | null; onSelect: (id: string) => void; onDelete: (s: SolutionRow) => void;
 }) {
   if (!solutions.length) return <div className="panel empty">Nothing loaded yet. Drop a solution .zip above to begin.</div>;
   return (
-    <div className="tablewrap"><table>
-      <thead><tr><th>Solution</th><th>Version</th><th>Type</th><th>File</th><th>Loaded</th><th /></tr></thead>
-      <tbody>{solutions.map((s) => (
-        <tr key={s.id} className={s.id === selected ? "sel" : ""}>
-          <td>{s.friendly_name}<div className="muted mono">{s.unique_name}</div></td>
-          <td className="mono">{s.version}</td>
-          <td>{s.managed ? "Managed" : "Unmanaged"}{s.parent_solution_name && <div className="muted">Patch of {s.parent_solution_name}</div>}</td>
-          <td className="muted">{s.file_name}</td>
-          <td className="muted">{new Date(s.created_at).toLocaleString()}</td>
-          <td><div className="row"><button className="btn sm" onClick={() => onSelect(s.id)}>Analyze</button><button className="btn danger sm" onClick={() => onDelete(s)}>Delete</button></div></td>
-        </tr>
-      ))}</tbody>
-    </table></div>
+    <ColumnTable id="solutions" rows={solutions} columns={SOLUTION_COLUMNS} rowKey={(s) => s.id} exportName="solutions.csv" rowClass={(s) => (s.id === selected ? "sel" : "")} initialSort={{ key: "loaded", dir: -1 }}
+      actionsLabel="Actions" rowActions={(s) => <div className="row"><button className="btn sm" onClick={() => onSelect(s.id)}>Analyze</button><button className="btn danger sm" onClick={() => onDelete(s)}>Delete</button></div>} />
   );
 }
 
-const HIDE_SYSTEM_KEY = "d365-sa-hide-system";
-function readHideSystem(): boolean { try { return localStorage.getItem(HIDE_SYSTEM_KEY) === "1"; } catch { return false; } }
+interface AnalysisPrefs { view: "auto" | "missing" | "findings"; sev: "all" | "error" | "warning" | "info"; category: string; q: string; hideSystem: boolean; excluded: string[] }
+const ANALYSIS_DEFAULT: AnalysisPrefs = { view: "auto", sev: "all", category: "", q: "", hideSystem: false, excluded: [] };
+function normalizeAnalysis(raw: unknown): AnalysisPrefs {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  return {
+    view: asOneOf(r.view, ["auto", "missing", "findings"] as const, "auto"), sev: asOneOf(r.sev, ["all", "error", "warning", "info"] as const, "all"),
+    category: asString(r.category), q: asString(r.q), hideSystem: asBool(r.hideSystem), excluded: asStringArray(r.excluded),
+  };
+}
 
 const sevRank = { error: 0, warning: 1, info: 2 } as const;
 const MISSING_COLUMNS: TableColumn<MissingRow>[] = [
@@ -75,13 +82,17 @@ const MISSING_COLUMNS: TableColumn<MissingRow>[] = [
  * (referenced / required solutions, hide Microsoft-system) applies to both.
  */
 export function AnalysisView({ findings, missing, depsLoading, onRerun, busy }: { findings: FindingRow[]; missing: MissingRow[]; depsLoading: boolean; onRerun: () => void; busy: boolean }) {
-  const [view, setView] = useState<"auto" | "missing" | "findings">("auto");
+  // remembered per user: which view, the filters and the solution selection
+  const [prefs, setPrefs] = useSavedState<AnalysisPrefs>("analysis", ANALYSIS_DEFAULT, normalizeAnalysis);
+  const { view, sev, category, q, hideSystem } = prefs;
+  const excluded = useMemo(() => new Set(prefs.excluded), [prefs.excluded]);
+  const patch = (p: Partial<AnalysisPrefs>) => setPrefs((cur) => ({ ...cur, ...p }));
+  const setView = (v: AnalysisPrefs["view"]) => patch({ view: v });
+  const setSev = (v: AnalysisPrefs["sev"]) => patch({ sev: v });
+  const setCategory = (v: string) => patch({ category: v });
+  const setQ = (v: string) => patch({ q: v });
+  const setExcluded = (s: Set<string>) => patch({ excluded: [...s] });
   const active = view === "auto" ? (missing.length ? "missing" : "findings") : view;
-  const [sev, setSev] = useState<"all" | FindingRow["severity"]>("all");
-  const [category, setCategory] = useState("");
-  const [q, setQ] = useState("");
-  const [hideSystem, setHideSystem] = useState(readHideSystem);
-  const [excluded, setExcluded] = useState<Set<string>>(new Set());
 
   const refs = useMemo(() => {
     const m = new Map<string, number>();
@@ -108,9 +119,9 @@ export function AnalysisView({ findings, missing, depsLoading, onRerun, busy }: 
   for (const r of missingShown) missCounts[r.severity]++;
   const hidden = active === "missing" ? missing.length - missingShown.length : findings.length - shown.length;
   const filtered = active === "missing" ? Boolean(excluded.size || hideSystem) : Boolean(category || q || excluded.size || hideSystem || sev !== "all");
-  const toggleSolution = (n: string) => setExcluded((s) => { const x = new Set(s); if (x.has(n)) x.delete(n); else x.add(n); return x; });
-  const setHide = (v: boolean) => { setHideSystem(v); try { localStorage.setItem(HIDE_SYSTEM_KEY, v ? "1" : "0"); } catch { /* storage unavailable */ } };
-  const clear = () => { setSev("all"); setCategory(""); setQ(""); setExcluded(new Set()); setHide(false); };
+  const toggleSolution = (n: string) => { const x = new Set(excluded); if (x.has(n)) x.delete(n); else x.add(n); setExcluded(x); };
+  const setHide = (v: boolean) => patch({ hideSystem: v });
+  const clear = () => patch({ sev: "all", category: "", q: "", excluded: [], hideSystem: false });
   const includedCount = refs.filter(([n]) => included(n)).length;
   const c = active === "missing" ? missCounts : counts;
 
@@ -174,86 +185,93 @@ export function AnalysisView({ findings, missing, depsLoading, onRerun, busy }: 
   </div>);
 }
 
-type SortKey = "table" | "column" | "display" | "type" | "required" | "fk";
+interface DictRow { table: string; column: string; display: string; type: string; required: string; fk: string; pk: boolean; custom?: boolean; secured?: boolean; optionSet: string; maxLength: string }
+const yn = (v: boolean | undefined) => (v ? "Yes" : "No");
+const DICT_COLUMNS: TableColumn<DictRow>[] = [
+  { key: "table", label: "Table", filter: "set", get: (r) => r.table, className: "mono" },
+  { key: "column", label: "Column", filter: "text", get: (r) => r.column, render: (r) => <span className="mono">{r.column}{r.pk && " 🔑"}{r.secured && " 🔒"}</span> },
+  { key: "display", label: "Display name", filter: "text", get: (r) => r.display },
+  { key: "type", label: "Type", filter: "set", get: (r) => r.type },
+  { key: "required", label: "Required", filter: "set", get: (r) => r.required },
+  { key: "fk", label: "Lookup →", filter: "text", get: (r) => r.fk, className: "mono" },
+  { key: "pk", label: "Primary key", filter: "set", defaultVisible: false, get: (r) => yn(r.pk) },
+  { key: "custom", label: "Custom", filter: "set", defaultVisible: false, get: (r) => yn(r.custom) },
+  { key: "secured", label: "Secured", filter: "set", defaultVisible: false, get: (r) => yn(r.secured) },
+  { key: "optionSet", label: "Option set", filter: "text", defaultVisible: false, get: (r) => r.optionSet },
+  { key: "maxLength", label: "Max length", filter: "text", defaultVisible: false, get: (r) => r.maxLength, sortValue: (r) => Number(r.maxLength) || 0 },
+];
+
 export function DictionaryView({ sol }: { sol: ParsedSolution }) {
-  const [q, setQ] = useState(""); const [table, setTable] = useState(""); const [sort, setSort] = useState<{ k: SortKey; dir: 1 | -1 }>({ k: "table", dir: 1 });
-  const rows = useMemo(() => (sol.entities ?? []).flatMap((e) => e.attributes.map((a) => ({
+  const rows = useMemo<DictRow[]>(() => (sol.entities ?? []).flatMap((e) => e.attributes.map((a) => ({
     table: e.logical, column: a.name, display: a.display, type: a.type, required: a.required, fk: (a.targets ?? []).join(", "),
-    pk: !!a.pk, custom: a.custom, secured: a.secured, optionSet: a.optionSet ?? "",
+    pk: !!a.pk, custom: a.custom, secured: a.secured, optionSet: a.optionSet ?? "", maxLength: a.maxLength ?? "",
   }))), [sol]);
-  const tables = useMemo(() => (sol.entities ?? []).map((e) => e.logical).sort(), [sol]);
-  const shown = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    return rows.filter((r) => (!table || r.table === table) && (!needle || `${r.table} ${r.column} ${r.display} ${r.type} ${r.fk}`.toLowerCase().includes(needle)))
-      .sort((a, b) => (a[sort.k] < b[sort.k] ? -1 : a[sort.k] > b[sort.k] ? 1 : 0) * sort.dir);
-  }, [rows, q, table, sort]);
   if (!rows.length) return <div className="panel empty">No table definitions in this package (the solution may contain only shell or non-table components).</div>;
-  const th = (k: SortKey, label: string) => (
-    <th className="sortable" onClick={() => setSort((s) => ({ k, dir: s.k === k ? (-s.dir as 1 | -1) : 1 }))} aria-sort={sort.k === k ? (sort.dir === 1 ? "ascending" : "descending") : "none"}>
-      {label}{sort.k === k ? (sort.dir === 1 ? " ▲" : " ▼") : ""}
-    </th>
-  );
-  return (<div>
-    <div className="toolbar">
-      <input type="search" placeholder="Search columns…" value={q} onChange={(e) => setQ(e.target.value)} />
-      <select value={table} onChange={(e) => setTable(e.target.value)} aria-label="Table"><option value="">All tables ({tables.length})</option>{tables.map((t) => <option key={t}>{t}</option>)}</select>
-      <span className="muted">{shown.length} of {rows.length} columns</span><span className="grow" />
-      <button className="btn ghost" onClick={() => downloadCsv(`${sol.uniqueName}-dictionary.csv`, [["Table", "Column", "Display name", "Type", "Required", "PK", "Lookup targets", "Custom", "Secured", "Option set"], ...shown.map((r) => [r.table, r.column, r.display, r.type, r.required, r.pk, r.fk, r.custom, r.secured, r.optionSet])])}>Export CSV</button>
-    </div>
-    <div className="tablewrap"><table>
-      <thead><tr>{th("table", "Table")}{th("column", "Column")}{th("display", "Display name")}{th("type", "Type")}{th("required", "Required")}{th("fk", "Lookup → ")}</tr></thead>
-      <tbody>{shown.slice(0, 2000).map((r) => (
-        <tr key={r.table + r.column}><td className="mono">{r.table}</td><td className="mono">{r.column}{r.pk && " 🔑"}{r.secured && " 🔒"}</td><td>{r.display}</td><td>{r.type}</td><td>{r.required}</td><td className="mono">{r.fk}</td></tr>
-      ))}</tbody>
-    </table></div>
-    {shown.length > 2000 && <p className="muted">Showing the first 2,000 rows; narrow the filter or export CSV for all.</p>}
-  </div>);
+  return <ColumnTable id="dictionary" rows={rows} columns={DICT_COLUMNS} rowKey={(r) => r.table + "." + r.column} exportName={`${sol.uniqueName}-dictionary.csv`} />;
 }
 
 const VERBS = ["create", "read", "write", "delete", "append", "appendto", "assign", "share"];
 const VERB_LABEL: Record<string, string> = { create: "Create", read: "Read", write: "Write", delete: "Delete", append: "Append", appendto: "Append To", assign: "Assign", share: "Share" };
 const LVL_LABEL: Record<AccessLevel, string> = { none: "—", user: "User", bu: "BU", deep: "Deep", org: "Org" };
+const LVL_RANK: Record<AccessLevel, number> = { none: 0, user: 1, bu: 2, deep: 3, org: 4 };
+
+interface PrivRow { table: string; known: boolean; pv: Record<string, AccessLevel> }
+const lvlOf = (r: PrivRow, v: string): AccessLevel => (r.pv[v] ?? "none") as AccessLevel;
+const PRIV_COLUMNS: TableColumn<PrivRow>[] = [
+  { key: "table", label: "Table", filter: "text", get: (r) => r.table, render: (r) => <span className="mono">{r.table}{!r.known && <span className="err" title="Table is not in this solution"> ⚠</span>}</span> },
+  ...VERBS.map((v): TableColumn<PrivRow> => ({ key: v, label: VERB_LABEL[v], filter: "set", get: (r) => LVL_LABEL[lvlOf(r, v)], sortValue: (r) => LVL_RANK[lvlOf(r, v)], render: (r) => <span className={`lvl ${lvlOf(r, v)}`}>{LVL_LABEL[lvlOf(r, v)]}</span> })),
+];
+type FieldPermRow = { entity: string; attribute: string; read: boolean; create: boolean; update: boolean };
+const FIELD_COLUMNS: TableColumn<FieldPermRow>[] = [
+  { key: "entity", label: "Table", filter: "set", get: (r) => r.entity, className: "mono" },
+  { key: "attribute", label: "Column", filter: "text", get: (r) => r.attribute, className: "mono" },
+  { key: "read", label: "Read", filter: "set", get: (r) => (r.read ? "Yes" : "No"), render: (r) => (r.read ? "✓" : "—") },
+  { key: "create", label: "Create", filter: "set", get: (r) => (r.create ? "Yes" : "No"), render: (r) => (r.create ? "✓" : "—") },
+  { key: "update", label: "Update", filter: "set", get: (r) => (r.update ? "Yes" : "No"), render: (r) => (r.update ? "✓" : "—") },
+];
+
+interface SecurityPrefs { mode: "roles" | "fields"; role: string; profile: string }
+const normalizeSecurity = (raw: unknown): SecurityPrefs => {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  return { mode: asOneOf(r.mode, ["roles", "fields"] as const, "roles"), role: asString(r.role), profile: asString(r.profile) };
+};
 
 export function SecurityView({ sol }: { sol: ParsedSolution }) {
   const roles = sol.roles ?? [], profiles = sol.fieldProfiles ?? [];
-  const [mode, setMode] = useState<"roles" | "fields">(roles.length ? "roles" : "fields");
-  const [role, setRole] = useState(roles[0]?.name ?? ""); const [profile, setProfile] = useState(profiles[0]?.name ?? ""); const [q, setQ] = useState("");
+  const [prefs, setPrefs] = useSavedState<SecurityPrefs>("security", { mode: "roles", role: "", profile: "" }, normalizeSecurity);
+  const mode = prefs.mode === "roles" && roles.length ? "roles" : prefs.mode === "fields" && profiles.length ? "fields" : roles.length ? "roles" : "fields";
+  const role = roles.some((x) => x.name === prefs.role) ? prefs.role : roles[0]?.name ?? "";
+  const profile = profiles.some((x) => x.name === prefs.profile) ? prefs.profile : profiles[0]?.name ?? "";
+  const r = roles.find((x) => x.name === role), p = profiles.find((x) => x.name === profile);
+  const privRows = useMemo<PrivRow[]>(() => {
+    const ents = new Set((sol.entities ?? []).map((e) => e.logical));
+    return r ? Object.entries(r.privileges).map(([table, pv]) => ({ table, known: ents.has(table) || !table.includes("_"), pv })) : [];
+  }, [r, sol]);
   if (!roles.length && !profiles.length) return <div className="panel empty">No security roles or field security profiles in this package.</div>;
-  const r = roles.find((x) => x.name === role); const p = profiles.find((x) => x.name === profile);
-  const ents = new Set((sol.entities ?? []).map((e) => e.logical));
   return (<div>
     <div className="toolbar">
-      <div className="seg">
-        {roles.length > 0 && <button className={mode === "roles" ? "on" : ""} onClick={() => setMode("roles")}>Table privileges</button>}
-        {profiles.length > 0 && <button className={mode === "fields" ? "on" : ""} onClick={() => setMode("fields")}>Field security</button>}
+      <div className="seg" role="group" aria-label="Security view">
+        {roles.length > 0 && <button aria-pressed={mode === "roles"} className={mode === "roles" ? "on" : ""} onClick={() => setPrefs((c) => ({ ...c, mode: "roles" }))}>Table privileges</button>}
+        {profiles.length > 0 && <button aria-pressed={mode === "fields"} className={mode === "fields" ? "on" : ""} onClick={() => setPrefs((c) => ({ ...c, mode: "fields" }))}>Field security</button>}
       </div>
-      {mode === "roles" ? <select value={role} onChange={(e) => setRole(e.target.value)} aria-label="Role">{roles.map((x) => <option key={x.name}>{x.name}</option>)}</select>
-        : <select value={profile} onChange={(e) => setProfile(e.target.value)} aria-label="Profile">{profiles.map((x) => <option key={x.name}>{x.name}</option>)}</select>}
-      <input type="search" placeholder="Filter tables…" value={q} onChange={(e) => setQ(e.target.value)} />
+      {mode === "roles" ? <select value={role} onChange={(e) => setPrefs((c) => ({ ...c, role: e.target.value }))} aria-label="Role">{roles.map((x) => <option key={x.name}>{x.name}</option>)}</select>
+        : <select value={profile} onChange={(e) => setPrefs((c) => ({ ...c, profile: e.target.value }))} aria-label="Profile">{profiles.map((x) => <option key={x.name}>{x.name}</option>)}</select>}
     </div>
-    {mode === "roles" && r && (
-      <div className="tablewrap"><table>
-        <thead><tr><th>Table</th>{VERBS.map((v) => <th key={v}>{VERB_LABEL[v]}</th>)}</tr></thead>
-        <tbody>{Object.entries(r.privileges).filter(([t]) => t.includes(q.toLowerCase())).sort(([a], [b]) => a.localeCompare(b)).map(([t, pv]) => (
-          <tr key={t}><td className="mono">{t}{!ents.has(t) && t.includes("_") && <span className="err" title="Table is not in this solution"> ⚠</span>}</td>
-            {VERBS.map((v) => <td key={v}><span className={`lvl ${pv[v] ?? "none"}`}>{LVL_LABEL[(pv[v] ?? "none") as AccessLevel]}</span></td>)}</tr>
-        ))}</tbody>
-      </table></div>
-    )}
-    {mode === "fields" && p && (
-      <div className="tablewrap"><table>
-        <thead><tr><th>Table</th><th>Column</th><th>Read</th><th>Create</th><th>Update</th></tr></thead>
-        <tbody>{p.permissions.filter((x) => x.entity.includes(q.toLowerCase())).map((x) => (
-          <tr key={x.entity + x.attribute}><td className="mono">{x.entity}</td><td className="mono">{x.attribute}</td><td>{x.read ? "✓" : "—"}</td><td>{x.create ? "✓" : "—"}</td><td>{x.update ? "✓" : "—"}</td></tr>
-        ))}</tbody>
-      </table></div>
-    )}
+    {mode === "roles" && r && <ColumnTable id="security.roles" rows={privRows} columns={PRIV_COLUMNS} rowKey={(x) => x.table} exportName={`${role}-privileges.csv`} initialSort={{ key: "table", dir: 1 }} />}
+    {mode === "fields" && p && <ColumnTable id="security.fields" rows={p.permissions} columns={FIELD_COLUMNS} rowKey={(x) => x.entity + "." + x.attribute} exportName={`${profile}-field-permissions.csv`} />}
   </div>);
 }
 
+const LOG_COLUMNS: TableColumn<LogRow>[] = [
+  { key: "when", label: "When", filter: "text", get: (l) => new Date(l.created_at).toLocaleString(), sortValue: (l) => l.created_at, className: "muted" },
+  { key: "action", label: "Action", filter: "set", get: (l) => l.action },
+  { key: "summary", label: "Summary", filter: "text", get: (l) => l.summary },
+  { key: "app", label: "App", filter: "set", get: (l) => `v${l.app_version ?? ""}`, className: "muted" },
+];
+
 interface Health { version: string; encryption: boolean; allowList: boolean; tables: { table: string; ok: boolean; hint?: string }[]; config: { level: "error" | "warn"; message: string }[] }
 
-export function LogView({ log, version, api, onPurge }: { log: LogRow[]; version: string; api: Api; onPurge: () => void }) {
+export function LogView({ log, version, api, onPurge, onResetView }: { log: LogRow[]; version: string; api: Api; onPurge: () => void; onResetView: () => void }) {
   const [health, setHealth] = useState<Health | null>(null);
   const [msg, setMsg] = useState("");
   useEffect(() => { api<Health>("/api/health").then(setHealth).catch((e) => setMsg(errMsg(e))); }, [api]);
@@ -280,11 +298,11 @@ export function LogView({ log, version, api, onPurge }: { log: LogRow[]; version
       <h2>Your data</h2>
       <p className="muted">Solution metadata, findings, comparisons and this history are encrypted before storage and visible only to your account. Download everything we hold, or erase it.</p>
       <div className="row"><button className="btn ghost" onClick={exportData}>Download my data (JSON)</button><button className="btn danger" onClick={onPurge}>Delete all my data…</button></div>
+      <p className="muted" style={{ marginTop: 12 }}>This browser remembers where you left off: the last page, the selected solution, filters, sort order and column layouts (per account, never sent to the server).</p>
+      <button className="btn ghost" onClick={onResetView}>Reset saved view settings</button>
     </div>
     <h2>Activity</h2>
     <p className="muted">Audit trail of actions in this workspace (stored encrypted). Project release notes are in CHANGELOG.md.</p>
-    <div className="tablewrap"><table><thead><tr><th>When</th><th>Action</th><th>Summary</th><th>App</th></tr></thead>
-      <tbody>{log.map((l) => <tr key={l.id}><td className="muted">{new Date(l.created_at).toLocaleString()}</td><td>{l.action}</td><td>{l.summary}</td><td className="muted">v{l.app_version}</td></tr>)}
-        {!log.length && <tr><td colSpan={4} className="muted">No activity yet.</td></tr>}</tbody></table></div>
+    <ColumnTable id="log" rows={log} columns={LOG_COLUMNS} rowKey={(l) => String(l.id)} exportName="activity.csv" initialSort={{ key: "when", dir: -1 }} empty="No activity yet." />
   </div>);
 }

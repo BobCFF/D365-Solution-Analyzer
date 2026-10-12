@@ -7,6 +7,8 @@ import type { ImportPlan } from "@/lib/d365/dependencies";
 import { parseSolutionZip } from "@/lib/d365/parser";
 import type { ParsedSolution } from "@/lib/d365/types";
 import { APP_VERSION } from "@/lib/version";
+import { asOneOf, asString } from "@/lib/uiStateStore";
+import { UiStateProvider, useSavedState, useUiStore } from "./uiState";
 import { Confirm, ThemeCycle, Toast } from "./ui";
 import { CompareApp } from "./CompareApp";
 import { DependenciesView, FlowsView, NavigationView, type DepsPayload } from "./insights";
@@ -18,12 +20,22 @@ const TABS: [Tab, string][] = [["solutions", "Solutions"], ["analysis", "Analysi
 const sha256 = async (buf: ArrayBuffer) =>
   [...new Uint8Array(await crypto.subtle.digest("SHA-256", buf))].map((b) => b.toString(16).padStart(2, "0")).join("");
 
-export function Dashboard({ token, email, onSignOut }: { token: string; email: string; onSignOut: () => void }) {
-  const [tab, setTab] = useState<Tab>("solutions");
+const TAB_IDS = TABS.map(([id]) => id) as readonly Tab[];
+
+/** Everything below remembers the user's place (page, selected solution, filters, sorts, columns) in this browser, per account. */
+export function Dashboard(props: { token: string; email: string; userId: string; onSignOut: () => void }) {
+  return <UiStateProvider key={props.userId} userId={props.userId}><DashboardInner {...props} /></UiStateProvider>;
+}
+
+function DashboardInner({ token, email, onSignOut }: { token: string; email: string; userId: string; onSignOut: () => void }) {
+  const store = useUiStore();
+  const [tab, setTab] = useSavedState<Tab>("page", "solutions", (r) => asOneOf(r, TAB_IDS, "solutions"));
   const [solutions, setSolutions] = useState<SolutionRow[]>([]);
   const [unreadable, setUnreadable] = useState(0);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelectedRaw] = useSavedState<string>("selected", "", (r) => asString(r));
+  const setSelected = useCallback((id: string | null) => setSelectedRaw(id ?? ""), [setSelectedRaw]);
   const [parsed, setParsed] = useState<ParsedSolution | null>(null);
+  const restoredSelection = useRef(false);
   const [findings, setFindings] = useState<FindingRow[]>([]);
   const [depsState, setDepsState] = useState<{ id: string; data: DepsPayload } | null>(null);
   const [plan, setPlan] = useState<ImportPlan | null>(null);
@@ -48,10 +60,23 @@ export function Dashboard({ token, email, onSignOut }: { token: string; email: s
   useEffect(() => {
     let live = true;
     Promise.all([api<{ solutions: SolutionRow[]; unreadable: number }>("/api/solutions"), api<{ entries: LogRow[] }>("/api/changelog")])
-      .then(([r, l]) => { if (live) { setSolutions(r.solutions); setUnreadable(r.unreadable); setLog(l.entries); } })
+      .then(([r, l]) => {
+        if (!live) return;
+        setSolutions(r.solutions); setUnreadable(r.unreadable); setLog(l.entries);
+        // reopen the solution the user was last working on (if it still exists)
+        const last = store.get("selected", "", (x) => asString(x));
+        if (!restoredSelection.current && last) {
+          restoredSelection.current = true;
+          if (r.solutions.some((x) => x.id === last)) {
+            api<{ solution: { parsed: ParsedSolution }; findings: FindingRow[] }>(`/api/solutions/${last}`)
+              .then((d) => { if (live) { setParsed(d.solution.parsed); setFindings(d.findings); } })
+              .catch(() => { if (live) { setSelectedRaw(""); } });
+          } else setSelectedRaw("");
+        }
+      })
       .catch((e) => { if (live) setError(errMsg(e)); });
     return () => { live = false; };
-  }, [api]);
+  }, [api]); // eslint-disable-line react-hooks/exhaustive-deps -- runs once per session token
 
   const run = async (fn: () => Promise<void>) => {
     setBusy(true); setError("");
@@ -62,7 +87,7 @@ export function Dashboard({ token, email, onSignOut }: { token: string; email: s
     const { solution, findings } = await api<{ solution: { parsed: ParsedSolution }; findings: FindingRow[] }>(`/api/solutions/${id}`);
     setSelected(id); setParsed(solution.parsed); setFindings(findings);
     if (goTo) setTab(goTo);
-  }, [api]);
+  }, [api, setSelected, setTab]);
 
   const upload = (files: FileList | File[]) => run(async () => {
     let last: string | null = null;
@@ -90,7 +115,7 @@ export function Dashboard({ token, email, onSignOut }: { token: string; email: s
   });
   const purge = () => run(async () => {
     await api("/api/account", { method: "DELETE", headers: { "x-confirm": "delete-all-my-data" } });
-    setSelected(null); setParsed(null); setFindings([]); setDepsState(null); setPlan(null); setConfirmPurge(false);
+    setSelected(null); setParsed(null); setFindings([]); setDepsState(null); setPlan(null); setConfirmPurge(false); store.reset();
     await refresh(); setToast("All your stored data was deleted");
   });
   const loadParsed = useCallback(async (id: string) => (await api<{ solution: { parsed: ParsedSolution } }>(`/api/solutions/${id}`)).solution.parsed, [api]);
@@ -156,7 +181,7 @@ export function Dashboard({ token, email, onSignOut }: { token: string; email: s
         {tab === "dictionary" && parsed && <DictionaryView sol={parsed} />}
         {tab === "security" && parsed && <SecurityView key={selected} sol={parsed} />}
         {tab === "compare" && <CompareApp solutions={solutions} load={loadParsed} onLogged={logCompare} />}
-        {tab === "log" && <LogView log={log} version={APP_VERSION} api={api} onPurge={() => setConfirmPurge(true)} />}
+        {tab === "log" && <LogView log={log} version={APP_VERSION} api={api} onPurge={() => setConfirmPurge(true)} onResetView={() => { store.reset(); window.location.reload(); }} />}
         <p className="faint" style={{ marginTop: 24 }}>D365 Solution Analyzer v{APP_VERSION} · not affiliated with or endorsed by Microsoft · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></p>
       </main>
 

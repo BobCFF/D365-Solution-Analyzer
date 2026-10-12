@@ -34,7 +34,7 @@ function App() {
   if (!ready) return null;
   if (recovering && session) return <NewPassword db={db} onDone={() => setRecovering(false)} />;
   if (!session) return <Login db={db} />;
-  return <Dashboard token={session.access_token} email={session.user.email ?? ""} onSignOut={() => db.auth.signOut()} />;
+  return <Dashboard token={session.access_token} email={session.user.email ?? ""} userId={session.user.id} onSignOut={() => db.auth.signOut()} />;
 }
 
 type Db = ReturnType<typeof browserClient>;
