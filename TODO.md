@@ -33,6 +33,7 @@ Legend: P0 first, P1 important, P2 nice-to-have.
 - [ ] Accessibility pass (focus trap in dialogs, table semantics).
 
 ## Done
+- [x] 0.8.0 Column ⋯ menus (sort, multi-select filter, move, hide) and a Columns list with remembered layout.
 - [x] 0.7.0 Missing-dependencies table with per-column filters on the Analysis page; reusable ColumnTable.
 - [x] 0.6.0 Analysis filters: severity, category, search, referenced-solutions dropdown, hide Microsoft/system solutions.
 - [x] 0.5.0 Review adoption: zod payload validation, abuse limits, API guard, getClaims, withUser/log/env helpers, Status panel, export, privacy/terms/LICENSE, ESLint, native dialogs, login + contrast fixes (see docs/REVIEW-ADOPTION.md).
