@@ -101,7 +101,7 @@ function DashboardInner({ token, email, onSignOut }: { token: string; email: str
       const buf = await file.arrayBuffer();
       at(i, 0.2, "unpacking and parsing in your browser"); await yieldToUi();
       const model = await parseSolutionZip(new Uint8Array(buf)); // unpacked in the browser; the .zip itself is never uploaded
-      at(i, 0.6, "encrypting and saving the parsed metadata");
+      at(i, 0.6, "analyzing for errors, then encrypting and saving");
       const { id } = await api<{ id: string }>("/api/solutions", { method: "POST", json: { fileName: file.name, fileSha256: await sha256(buf), parsed: model } });
       last = id;
       at(i, 1, "saved");

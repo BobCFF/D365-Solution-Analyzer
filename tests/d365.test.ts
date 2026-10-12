@@ -410,7 +410,7 @@ describe("saved table state (0.9.0)", () => {
 
 describe("busy dialog wording (0.11.0)", () => {
   it("labels API calls by path and method", () => {
-    expect(labelFor("/api/solutions", "POST")).toBe("Saving solution (encrypted)");
+    expect(labelFor("/api/solutions", "POST")).toBe("Analyzing and saving solution");
     expect(labelFor("/api/solutions")).toBe("Loading your solutions");
     expect(labelFor("/api/solutions/abc", "DELETE")).toBe("Deleting solution");
     expect(labelFor("/api/solutions/abc/dependencies?x=1")).toBe("Resolving dependencies");
