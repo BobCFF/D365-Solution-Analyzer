@@ -8,6 +8,8 @@ import { parseSolutionZip } from "@/lib/d365/parser";
 import type { ParsedSolution } from "@/lib/d365/types";
 import { APP_VERSION } from "@/lib/version";
 import { asOneOf, asString } from "@/lib/uiStateStore";
+import { EnvironmentsView, type ConnRow } from "./environments";
+import { applyTargetResult, type TargetResult } from "@/lib/d365/targetCheck";
 import { ProgressProvider, useProgress, yieldToUi } from "./progress";
 import { UiStateProvider, useSavedState, useUiStore } from "./uiState";
 import { Confirm, ThemeCycle, Toast } from "./ui";
@@ -15,8 +17,8 @@ import { CompareApp } from "./CompareApp";
 import { DependenciesView, FlowsView, NavigationView, type DepsPayload } from "./insights";
 import { AnalysisView, DictionaryView, LogView, SecurityView, SolutionPicker, SolutionsView, type FindingRow, type LogRow, type SolutionRow } from "./views";
 
-type Tab = "solutions" | "analysis" | "deps" | "navigation" | "flows" | "dictionary" | "security" | "compare" | "log";
-const TABS: [Tab, string][] = [["solutions", "Solutions"], ["analysis", "Analysis"], ["deps", "Dependencies"], ["navigation", "Navigation"], ["flows", "Flows"], ["dictionary", "Data Dictionary"], ["security", "Security"], ["compare", "Compare"], ["log", "Change log"]];
+type Tab = "solutions" | "analysis" | "deps" | "navigation" | "flows" | "dictionary" | "security" | "compare" | "environments" | "log";
+const TABS: [Tab, string][] = [["solutions", "Solutions"], ["analysis", "Analysis"], ["deps", "Dependencies"], ["navigation", "Navigation"], ["flows", "Flows"], ["dictionary", "Data Dictionary"], ["security", "Security"], ["compare", "Compare"], ["environments", "Environments"], ["log", "Change log"]];
 
 const sha256 = async (buf: ArrayBuffer) =>
   [...new Uint8Array(await crypto.subtle.digest("SHA-256", buf))].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -42,6 +44,9 @@ function DashboardInner({ token, email, onSignOut }: { token: string; email: str
   const [plan, setPlan] = useState<ImportPlan | null>(null);
   const [log, setLog] = useState<LogRow[]>([]);
   const [busy, setBusy] = useState(false);
+  const [connections, setConnections] = useState<ConnRow[]>([]);
+  const [connectionsOk, setConnectionsOk] = useState(true);
+  const [target, setTarget] = useState<{ solutionId: string; result: TargetResult } | null>(null);
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
   const [over, setOver] = useState(false);
@@ -80,6 +85,12 @@ function DashboardInner({ token, email, onSignOut }: { token: string; email: str
     return () => { live = false; };
   }, [api]); // eslint-disable-line react-hooks/exhaustive-deps -- runs once per session token
 
+  const refreshConnections = useCallback(async () => {
+    try { setConnections((await api<{ connections: ConnRow[] }>("/api/connections")).connections); setConnectionsOk(true); }
+    catch { setConnections([]); setConnectionsOk(false); } // table missing until the migration is run
+  }, [api]);
+  useEffect(() => { void Promise.resolve().then(refreshConnections); }, [refreshConnections]);
+
   const run = async (fn: () => Promise<void>) => {
     setBusy(true); setError("");
     try { await fn(); } catch (e) { setError(e instanceof ApiError ? e.message : errMsg(e)); } finally { setBusy(false); }
@@ -112,6 +123,12 @@ function DashboardInner({ token, email, onSignOut }: { token: string; email: str
     if (last) await open(last, "analysis");
   }, { immediate: true }));
 
+  const verify = (connectionId: string) => run(async () => {
+    if (!selected) return;
+    const result = await api<TargetResult>(`/api/solutions/${selected}/verify`, { method: "POST", json: { connectionId } });
+    setTarget({ solutionId: selected, result });
+    setToast(`Checked ${result.checkedCount} component(s) in ${result.environment}`);
+  });
   const rerun = () => run(async () => {
     if (!selected) return;
     await api(`/api/solutions/${selected}`, { method: "POST" });
@@ -124,7 +141,7 @@ function DashboardInner({ token, email, onSignOut }: { token: string; email: str
   });
   const purge = () => run(async () => {
     await api("/api/account", { method: "DELETE", headers: { "x-confirm": "delete-all-my-data" } });
-    setSelected(null); setParsed(null); setFindings([]); setDepsState(null); setPlan(null); setConfirmPurge(false); store.reset();
+    setSelected(null); setParsed(null); setFindings([]); setDepsState(null); setPlan(null); setTarget(null); setConnections([]); setConfirmPurge(false); store.reset();
     await refresh(); setToast("All your stored data was deleted");
   });
   const loadParsed = useCallback(async (id: string) => (await api<{ solution: { parsed: ParsedSolution } }>(`/api/solutions/${id}`)).solution.parsed, [api]);
@@ -143,7 +160,10 @@ function DashboardInner({ token, email, onSignOut }: { token: string; email: str
 
   // dependency data of the selected solution (stale data stays visible while a refresh is in flight)
   const deps = depsState && depsState.id === selected ? depsState.data : null;
-  const missingRows = useMemo(() => (parsed ? buildMissingRows(parsed, deps?.resolved ?? null, deps?.loaded ?? null) : []), [parsed, deps]);
+  const missingRows = useMemo(() => {
+    const rows = parsed ? buildMissingRows(parsed, deps?.resolved ?? null, deps?.loaded ?? null) : [];
+    return applyTargetResult(rows, target && target.solutionId === selected ? target.result : null);
+  }, [parsed, deps, target, selected]);
   const needsSelection = (tab === "analysis" || tab === "deps" || tab === "navigation" || tab === "flows" || tab === "dictionary" || tab === "security");
 
   return (
@@ -183,13 +203,14 @@ function DashboardInner({ token, email, onSignOut }: { token: string; email: str
           </div>
         )}
         {needsSelection && !parsed && <div className="panel empty">Load or choose a solution to see this view.</div>}
-        {tab === "analysis" && parsed && <AnalysisView key={selected} findings={findings} missing={missingRows} depsLoading={!deps} onRerun={rerun} busy={busy} />}
+        {tab === "analysis" && parsed && <AnalysisView key={selected} findings={findings} missing={missingRows} depsLoading={!deps} onRerun={rerun} busy={busy} connections={connections} onVerify={verify} targetInfo={target && target.solutionId === selected ? target.result : null} onOpenEnvironments={() => setTab("environments")} />}
         {tab === "deps" && parsed && <DependenciesView sol={parsed} deps={deps} plan={plan} />}
         {tab === "navigation" && parsed && <NavigationView sol={parsed} deps={deps} />}
         {tab === "flows" && parsed && <FlowsView key={selected} sol={parsed} deps={deps} />}
         {tab === "dictionary" && parsed && <DictionaryView sol={parsed} />}
         {tab === "security" && parsed && <SecurityView key={selected} sol={parsed} />}
         {tab === "compare" && <CompareApp solutions={solutions} load={loadParsed} onLogged={logCompare} />}
+        {tab === "environments" && <EnvironmentsView connections={connections} available={connectionsOk} api={api} onChanged={refreshConnections} />}
         {tab === "log" && <LogView log={log} version={APP_VERSION} api={api} onPurge={() => setConfirmPurge(true)} onResetView={() => { store.reset(); window.location.reload(); }} />}
         <p className="faint" style={{ marginTop: 24 }}>D365 Solution Analyzer v{APP_VERSION} · not affiliated with or endorsed by Microsoft · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></p>
       </main>

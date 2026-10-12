@@ -26,6 +26,7 @@ Legend: P0 first, P1 important, P2 nice-to-have.
 - [ ] Compare: saved comparisons, column filters/menus, virtualized rows, 3-way (base) compare, side-by-side XML diff.
 
 ## P2
+- [ ] Environments: interactive (delegated) sign-in as an alternative to a service principal; verify more types (option sets, relationships, security role privileges); compare a solution's version/layering against the target's installed solution; PGlite RLS tests for `d365_connections`.
 - [ ] Optional cross-device sync of the saved view (sealed, per user) instead of per-browser storage; remember scroll position.
 - [ ] ERD view of a loaded solution (deep-link into D365 ERD Builder or embed).
 - [ ] Group by publisher prefix with colors; relationship category filters.
@@ -33,6 +34,7 @@ Legend: P0 first, P1 important, P2 nice-to-have.
 - [ ] Accessibility pass (focus trap in dialogs, table semantics).
 
 ## Done
+- [x] 0.12.0 Saved Dynamics 365 connections (service principal) and read-only verification of missing dependencies against a real environment.
 - [x] 0.11.0 App-wide progress dialog for every request and long job.
 - [x] 0.10.0 Adjustable (and remembered) column widths on all tables.
 - [x] 0.9.1 Full-width, full-height layout on every page.

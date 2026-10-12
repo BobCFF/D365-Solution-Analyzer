@@ -7,6 +7,7 @@ import { errMsg } from "@/lib/api-client";
 import { categoryOf, filterFindings, isSystemSolution } from "@/lib/d365/findingMeta";
 import { ColumnTable, type TableColumn } from "./ColumnTable";
 import type { MissingRow } from "@/lib/d365/missingDeps";
+import type { TargetResult } from "@/lib/d365/targetCheck";
 import { asBool, asOneOf, asString, asStringArray } from "@/lib/uiStateStore";
 import { useSavedState } from "./uiState";
 import { downloadCsv, MenuButton, SEV_ORDER } from "./ui";
@@ -68,6 +69,8 @@ const MISSING_COLUMNS: TableColumn<MissingRow>[] = [
     render: (r) => r.requiredSolution ? <><span className="mono">{r.requiredSolution}</span>{r.requiredSolutionVersion && <span className="muted"> {r.requiredSolutionVersion}</span>}{isSystemSolution(r.requiredSolution) && <div className="faint">Microsoft/system</div>}</> : <span className="faint">unknown</span> },
   { key: "avail", label: "Availability", filter: "set", get: (r) => (r.availability === "loaded" ? "Solution loaded" : r.availability === "not-loaded" ? "Not loaded" : r.source === "scan" ? "Not in any loaded solution" : "Unknown"),
     render: (r) => <span className={`chip ${r.availability === "loaded" ? "ok" : "warning"}`}>{r.availability === "loaded" ? "Solution loaded" : r.availability === "not-loaded" ? "Not loaded" : r.source === "scan" ? "Not in any loaded solution" : "Unknown"}</span> },
+  { key: "target", label: "In target environment", filter: "set", get: (r) => (r.target?.state === "present" ? "Present" : r.target?.state === "absent" ? "Missing in target" : "Not checked"),
+    render: (r) => <><span className={`chip ${r.target?.state === "present" ? "ok" : r.target?.state === "absent" ? "error" : "info"}`}>{r.target?.state === "present" ? "Present" : r.target?.state === "absent" ? "Missing in target" : "Not checked"}</span>{r.target?.note && <div className="faint">{r.target.note}</div>}</> },
   { key: "depType", label: "Required by (type)", filter: "set", defaultVisible: false, get: (r) => r.dependentType },
   { key: "depName", label: "Required by", filter: "text", get: (r) => `${r.dependentType} ${r.dependentName} ${r.where ?? ""}`.trim(),
     render: (r) => <><span className="muted">{r.dependentType}</span> <span className="mono">{r.dependentName}</span>{r.where && <div className="faint">{r.where}</div>}</> },
@@ -81,7 +84,12 @@ const MISSING_COLUMNS: TableColumn<MissingRow>[] = [
  * filter under every column. Second view: all findings with severity/category/text filters. The Solutions dropdown
  * (referenced / required solutions, hide Microsoft-system) applies to both.
  */
-export function AnalysisView({ findings, missing, depsLoading, onRerun, busy }: { findings: FindingRow[]; missing: MissingRow[]; depsLoading: boolean; onRerun: () => void; busy: boolean }) {
+export function AnalysisView({ findings, missing, depsLoading, onRerun, busy, connections, onVerify, targetInfo, onOpenEnvironments }: {
+  findings: FindingRow[]; missing: MissingRow[]; depsLoading: boolean; onRerun: () => void; busy: boolean;
+  connections: { id: string; name: string }[]; onVerify: (connectionId: string) => void; targetInfo: TargetResult | null; onOpenEnvironments: () => void;
+}) {
+  const [connId, setConnId] = useSavedState<string>("analysis.conn", "", (r) => asString(r));
+  const chosenConn = connections.some((c) => c.id === connId) ? connId : connections[0]?.id ?? "";
   // remembered per user: which view, the filters and the solution selection
   const [prefs, setPrefs] = useSavedState<AnalysisPrefs>("analysis", ANALYSIS_DEFAULT, normalizeAnalysis);
   const { view, sev, category, q, hideSystem } = prefs;
@@ -149,11 +157,18 @@ export function AnalysisView({ findings, missing, depsLoading, onRerun, busy }: 
         <span className="chip error">{c.error} errors</span><span className="chip warning">{c.warning} warnings</span><span className="chip info">{c.info} info</span>
       </div>
       <span className="grow" />
+      {active === "missing" && (connections.length > 0
+        ? <>
+            <select aria-label="Environment to check against" value={chosenConn} onChange={(e) => setConnId(e.target.value)}>{connections.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+            <button className="btn" disabled={busy || !chosenConn} onClick={() => onVerify(chosenConn)} title="Read-only check of the still-missing components against a real Dynamics 365 environment">Verify against environment</button>
+          </>
+        : <button className="btn ghost" onClick={onOpenEnvironments} title="Connect a Dynamics 365 environment to check missing dependencies against it">Connect an environment…</button>)}
       <button className="btn ghost" disabled={busy} onClick={onRerun} title="Re-check against everything currently loaded (e.g. after loading a parent solution)">Re-run</button>
     </div>
 
     {active === "missing" && (<>
       <div className="toolbar filters">{solutionsMenu}{filtered && <button className="btn ghost sm" onClick={clear}>Clear filters</button>}</div>
+      {targetInfo && <div className="notice" role="status">Checked {targetInfo.checkedCount} component(s) against <b>{targetInfo.environment}</b> on {new Date(targetInfo.checkedAt).toLocaleString()}; {targetInfo.installed.length} solution(s) installed there.{targetInfo.warnings.length > 0 && <ul>{targetInfo.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>}</div>}
       {hidden > 0 && <p className="muted" role="status">{hidden} row(s) hidden by the solution filter.</p>}
       <p className="muted">One row per missing dependency: what is required, which solution provides it, and what needs it. Filter any column, sort by clicking a header, and use Columns to show more detail. Rows reported by the platform come from <code>solution.xml</code>; the rest were found by scanning navigation, forms, apps, flows, roles and schema{depsLoading ? " (scanning…)" : ""}.</p>
       <ColumnTable id="missing" rows={missingShown} columns={MISSING_COLUMNS} rowKey={(r) => r.id} exportName="missing-dependencies.csv" empty={<span className="chip ok">No missing dependencies found</span>} />

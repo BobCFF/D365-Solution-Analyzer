@@ -2,6 +2,15 @@
 
 All notable changes to this project are recorded here. Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/). The app version lives in `package.json` and is stamped on every in-app audit-log entry.
 
+## [0.12.0] - 2026-10-13
+### Added
+- **Connect a Dynamics 365 environment** (new **Environments** tab) and **verify missing dependencies against it**. On Analysis > Missing dependencies, pick a saved environment and press *Verify against environment*: every component still missing after looking at all loaded solutions (including GUID-addressed views, forms, roles and dashboards that were previously only "to verify") is looked up in the real environment, and a new **In target environment** column shows *Present*, *Missing in target* or *Not checked*. Present rows drop to info severity, confirmed-missing rows say so, and required solutions are compared against the installed solutions and versions (e.g. "installed 1.2.0.0 is older than the required 2.0.0.0").
+- Checks cover tables, columns, web resources, cloud flows, model-driven apps, environment variables, connection references, security roles, views, forms, charts, site maps and plug-in assemblies, plus installed solutions. Anything the application user may not read shows as *Not checked* with a note.
+- Microsoft-supported and read-only: Microsoft Entra client credentials with an application user in the environment, Dataverse Web API v9.2, GET requests only. A guide for creating the app registration and application user is on the Environments tab.
+- Security: the whole connection (including the client secret) is one AES-256-GCM sealed value, per-user key; the secret is never sent to the browser; only Microsoft-hosted Dataverse URLs are accepted (SSRF guard), redirects are not followed, tokens are never stored; results are shown in the browser and not saved. Connections are included in *Delete all my data* and (without secrets) in the data export.
+
+**Migration:** run `supabase/migrations/20261013000000_d365_connections.sql` in the Supabase SQL editor (safe to re-run; adds the `d365_connections` table and the `connect`/`verify` audit actions; no data is dropped). Until then the app works as before and the Environments tab explains what is missing.
+
 ## [0.11.1] - 2026-10-12
 ### Changed
 - The progress dialog now says "Analyzing and saving solution" (and the upload stage "analyzing for errors, then encrypting and saving") because the error analysis runs while a solution is saved.

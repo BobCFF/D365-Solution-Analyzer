@@ -5,7 +5,8 @@ import { withUser } from "@/lib/server/api";
 import { seal, unseal } from "@/lib/server/crypto";
 import { APP_VERSION } from "@/lib/version";
 
-const TABLES = ["solutions", "analysis_findings", "comparisons", "change_log"] as const;
+const TABLES = ["solutions", "analysis_findings", "comparisons", "change_log", "d365_connections"] as const;
+const MIGRATION: Record<string, string> = { d365_connections: "20261013000000_d365_connections.sql" };
 
 /**
  * Deployment self-check for the signed-in user (nothing secret is returned): configuration problems, whether the
@@ -14,7 +15,7 @@ const TABLES = ["solutions", "analysis_findings", "comparisons", "change_log"] a
 export const GET = withUser(async (_req, ctx) => {
   const tables = await Promise.all(TABLES.map(async (t) => {
     const { error } = await ctx.db.from(t).select("id", { count: "exact", head: true });
-    return { table: t, ok: !error, hint: error ? "Run supabase/migrations/20261012000000_encrypted_storage.sql in the Supabase SQL editor." : undefined };
+    return { table: t, ok: !error, hint: error ? `Run supabase/migrations/${MIGRATION[t] ?? "20261012000000_encrypted_storage.sql"} in the Supabase SQL editor.` : undefined };
   }));
   let encryption = false;
   try { encryption = unseal(ctx.userId, "health", seal(ctx.userId, "health", "ok")) === "ok"; } catch { /* reported below */ }

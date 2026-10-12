@@ -25,6 +25,7 @@ Requests carry the user's Supabase JWT (`Authorization: Bearer`); `clientForRequ
 | Payload validation | `validate.ts` |
 | Encryption (AES-256-GCM, per-user keys) | `src/lib/server/crypto.ts` |
 | Auth, `withUser`, limits, error shape, logging, env checks | `src/lib/server/{auth,api,api-response,log,env}.ts`, `src/instrumentation.ts` |
+| Dynamics 365 connections: validation, Dataverse read-only client, target check | `src/lib/d365/{environment,targetCheck}.ts`, `src/lib/server/dataverse.ts`, `src/lib/connections.ts`, `src/app/api/connections/**`, `src/app/api/solutions/[id]/verify` |
 | Browser API client | `src/lib/api-client.ts` |
 | Public pages | `src/app/{privacy,terms}/page.tsx` |
 | DB access (sealed) + audit log | `src/lib/store.ts`, `supabase.ts`, `supabase/migrations/` |

@@ -47,7 +47,7 @@ export function memoryLimit(userId: string, bucket: string, max: number, windowM
 export const LIMITS = { uploadsPerHour: 60, analysesPerHour: 120, comparesPerHour: 240, maxSolutions: 200 } as const;
 
 /** Durable limiter for mutating actions: counts the user's own audit-log rows (shared across instances, no extra table). */
-export async function auditLimit(ctx: Ctx, action: "upload" | "analyze" | "compare", max: number): Promise<Response | null> {
+export async function auditLimit(ctx: Ctx, action: "upload" | "analyze" | "compare" | "verify", max: number): Promise<Response | null> {
   const since = new Date(Date.now() - 3_600_000).toISOString();
   const { count, error } = await ctx.db.from("change_log").select("id", { count: "exact", head: true }).eq("action", action).gte("created_at", since);
   if (error) { log.warn("rate_limit_check_failed", { action, message: errMsg(error) }); return null; } // fail open on a limiter outage, never block the user's data
