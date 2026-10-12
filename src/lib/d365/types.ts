@@ -183,4 +183,6 @@ export interface Finding {
   detail: string;
   remediation?: string;
   componentKey?: string;
+  /** Unique names of OTHER solutions this finding refers to (required solution, overlapping solution, patch parent). */
+  solutions?: string[];
 }

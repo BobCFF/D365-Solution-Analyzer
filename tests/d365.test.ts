@@ -1,4 +1,5 @@
 import JSZip from "jszip";
+import { categoryOf, filterFindings, isSystemSolution } from "@/lib/d365/findingMeta";
 import { analyzeSelection, compareSets } from "@/lib/d365/comparison";
 import { planImportOrder } from "@/lib/d365/dependencies";
 import { diffFlows, layoutFlow } from "@/lib/d365/flowLayout";
@@ -251,5 +252,38 @@ describe("flow layout, flow diff, comparison and import order", () => {
     expect(plan.order.map((o) => o.solution)).toEqual(["Base", "Ext"]);
     expect(plan.order[1].after).toEqual(["Base"]);
     expect(plan.cycles).toEqual([]);
+  });
+});
+
+describe("analysis filters (0.6.0)", () => {
+  const f = (rule_id: string, severity: "error" | "warning" | "info", solutions?: string[]) => ({ rule_id, severity, title: rule_id, detail: `d ${rule_id}`, remediation: null, solutions });
+  const all = [f("DEP001", "error", ["System"]), f("DEP001", "error", ["Contoso_Core"]), f("LAY001", "warning", ["msdyn_FieldService", "Contoso_Core"]), f("NAV001", "error"), f("PUB002", "warning")];
+
+  it("recognises Microsoft/system solutions and categories", () => {
+    for (const n of ["Default", "System", "msdyn_Sales", "MicrosoftCRM", "ActivitiesCore"]) expect(isSystemSolution(n)).toBe(true);
+    for (const n of ["Contoso_Core", "AcmeSolution", ""]) expect(isSystemSolution(n)).toBe(false);
+    expect(categoryOf("DEP101")).toBe("Dependencies");
+    expect(categoryOf("FLOW002")).toBe("Flows");
+    expect(categoryOf("ZZZ001")).toBe("Other");
+  });
+  it("hides findings that only involve system solutions, keeps unreferenced ones", () => {
+    const r = filterFindings(all, { hideSystem: true });
+    expect(r.map((x) => x.solutions?.[0] ?? "-")).toEqual(["Contoso_Core", "msdyn_FieldService", "-", "-"]);
+  });
+  it("keeps a finding while at least one referenced solution is included", () => {
+    expect(filterFindings(all, { excluded: new Set(["Contoso_Core"]), hideSystem: true }).map((x) => x.rule_id)).toEqual(["NAV001", "PUB002"]);
+    expect(filterFindings(all, { excluded: new Set(["msdyn_FieldService"]) }).some((x) => x.rule_id === "LAY001")).toBe(true); // Contoso_Core still included
+  });
+  it("filters by severity, category and text", () => {
+    expect(filterFindings(all, { severity: "warning" }).map((x) => x.rule_id)).toEqual(["LAY001", "PUB002"]);
+    expect(filterFindings(all, { category: "Navigation" }).map((x) => x.rule_id)).toEqual(["NAV001"]);
+    expect(filterFindings(all, { q: "contoso" }).length).toBe(2);
+  });
+  it("records referenced solutions on findings", async () => {
+    const dep = `<MissingDependency><Required key="k" type="Entity" displayName="X" solution="BaseSol"/><Dependent key="d" type="Form" displayName="F"/></MissingDependency>`;
+    const p = await parseSolutionZip(await zipOf(solutionXml({ name: "Core", version: "1.0.0.0", extra: dep }), custXml([])));
+    expect(analyzeSolution(p).find((x) => x.ruleId === "DEP001")?.solutions).toEqual(["BaseSol"]);
+    const patch = await parseSolutionZip(await zipOf(solutionXml({ name: "Core_Patch_0a1b2c3d", version: "1.0.1.0" }), custXml([])));
+    expect(analyzeSolution(patch).find((x) => x.ruleId === "PAT001")?.solutions).toEqual(["Core"]);
   });
 });

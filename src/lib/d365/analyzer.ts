@@ -81,7 +81,7 @@ export function analyzeSolution(sol: ParsedSolution, ctx: AnalyzeContext = {}): 
       remediation: md.requiredSolution
         ? `Import solution "${md.requiredSolution}" into the target first, or add the required component to this solution.`
         : "Add the required component to the solution (Add required components) or install the solution that provides it.",
-      componentKey: md.requiredName });
+      componentKey: md.requiredName, ...(md.requiredSolution ? { solutions: [md.requiredSolution] } : {}) });
   }
 
   // --- Duplicate root components ----------------------------------------
@@ -126,23 +126,23 @@ export function analyzeSolution(sol: ParsedSolution, ctx: AnalyzeContext = {}): 
     if (!parent) {
       f.push({ ruleId: "PAT001", severity: "warning", title: "Parent solution not loaded",
         detail: `This is a patch of "${sol.parentSolutionName}", which is not loaded, so version and layering checks were skipped.`,
-        remediation: "Load the parent solution (and any earlier patches) to enable the full patch checks. The parent must exist in the target before a patch is imported." });
+        remediation: "Load the parent solution (and any earlier patches) to enable the full patch checks. The parent must exist in the target before a patch is imported.", solutions: [sol.parentSolutionName!] });
     } else {
       const pv = parseVersion(parent.version);
       if (ver && pv) {
         if (ver.major !== pv.major || ver.minor !== pv.minor) {
           f.push({ ruleId: "PAT002", severity: "error", title: "Patch major.minor differs from parent",
             detail: `Patch ${sol.version} must keep the parent's major.minor (${pv.major}.${pv.minor}); only build/revision may increase.`,
-            remediation: "Create the patch from the parent in the source environment (Clone a patch) so the version is assigned correctly. To change major/minor, clone the solution instead." });
+            remediation: "Create the patch from the parent in the source environment (Clone a patch) so the version is assigned correctly. To change major/minor, clone the solution instead.", solutions: [parent.uniqueName] });
         } else if (compareVersions(ver, pv) <= 0) {
           f.push({ ruleId: "PAT003", severity: "error", title: "Patch version not higher than parent",
             detail: `Patch ${sol.version} is not greater than parent ${parent.version}.`,
-            remediation: "Patch build/revision numbers must increase over the parent." });
+            remediation: "Patch build/revision numbers must increase over the parent.", solutions: [parent.uniqueName] });
         }
       }
       if (parent.managed !== sol.managed) {
         f.push({ ruleId: "PAT004", severity: "error", title: "Patch and parent managed state differ",
-          detail: `Parent is ${parent.managed ? "managed" : "unmanaged"} but patch is ${sol.managed ? "managed" : "unmanaged"}.` });
+          detail: `Parent is ${parent.managed ? "managed" : "unmanaged"} but patch is ${sol.managed ? "managed" : "unmanaged"}.`, solutions: [parent.uniqueName] });
       }
     }
     for (const rc of sol.rootComponents.filter((r) => r.type === 1 && r.behavior === 0)) {
@@ -162,7 +162,7 @@ export function analyzeSolution(sol: ParsedSolution, ctx: AnalyzeContext = {}): 
     if (shared.length) {
       f.push({ ruleId: "LAY001", severity: "warning", title: `Overlaps with solution "${o.uniqueName}"`,
         detail: `${shared.length} root component(s) are also in "${o.uniqueName}": ${shared.slice(0, 5).map((s) => `${componentTypeName(s.type)} ${s.key}`).join("; ")}${shared.length > 5 ? "; ..." : ""}.`,
-        remediation: "For managed solutions the last-imported solution wins at the top of the layer stack. Confirm import order, or move shared components into a common base solution." });
+        remediation: "For managed solutions the last-imported solution wins at the top of the layer stack. Confirm import order, or move shared components into a common base solution.", solutions: [o.uniqueName] });
     }
   }
 
