@@ -1,4 +1,5 @@
 import JSZip from "jszip";
+import { defaultLayout, moveColumn, normalizeLayout, toggleSetValue } from "@/lib/d365/columnFilter";
 import { parseSolutionRef, typeLabel, buildMissingRows } from "@/lib/d365/missingDeps";
 import { resolveReferences } from "@/lib/d365/dependencies";
 import { activeFilterCount, applyColumnFilters, distinctValues, sortRows, type ColDef } from "@/lib/d365/columnFilter";
@@ -335,5 +336,46 @@ describe("missing-dependency rows and column filters (0.7.0)", () => {
     expect(sortRows(rows, cols[2], 1).map((r) => r.n)).toEqual([1, 2, 10]);        // numeric, not lexical
     expect(sortRows(rows, cols[1], -1).map((r) => r.name)).toEqual(["Gamma", "beta", "Alpha"]);
     expect(activeFilterCount({ a: "x", b: "" })).toBe(1);
+  });
+});
+
+describe("column menu logic (0.8.0)", () => {
+  type R = { sev: string; name: string };
+  const rows: R[] = [{ sev: "error", name: "a" }, { sev: "warning", name: "b" }, { sev: "info", name: "c" }, { sev: "error", name: "d" }];
+  const sevCol: ColDef<R> = { key: "sev", label: "Sev", filter: "set", get: (r) => r.sev };
+  const nameCol: ColDef<R> = { key: "name", label: "Name", filter: "text", get: (r) => r.name };
+  const all = ["error", "warning", "info"];
+
+  it("filters set columns by included values (multi-select), empty array shows nothing", () => {
+    expect(applyColumnFilters(rows, [sevCol], { sev: ["error", "info"] }).map((r) => r.name)).toEqual(["a", "c", "d"]);
+    expect(applyColumnFilters(rows, [sevCol], { sev: [] })).toEqual([]);
+    expect(applyColumnFilters(rows, [sevCol, nameCol], { sev: ["error"], name: "d" }).map((r) => r.name)).toEqual(["d"]);
+    expect(activeFilterCount({ sev: [], name: "", other: ["x"] })).toBe(2);
+  });
+
+  it("toggles one value: starts from 'everything included' and clears the filter when all are included again", () => {
+    const a = toggleSetValue(undefined, "info", all);
+    expect(a).toEqual(["error", "warning"]);
+    expect(toggleSetValue(a, "info", all)).toBeUndefined();
+    expect(toggleSetValue(["error"], "warning", all)).toEqual(["error", "warning"]);
+    expect(toggleSetValue("error", "error", all)).toEqual([]);              // a plain string means "only this value"
+  });
+
+  it("heals a saved column layout against the current columns", () => {
+    const cols = [{ key: "a" }, { key: "b", defaultVisible: false }, { key: "c" }, { key: "d", defaultVisible: false }];
+    expect(defaultLayout(cols)).toEqual({ order: ["a", "b", "c", "d"], hidden: ["b", "d"] });
+    // saved layout knows a, c and a removed column "z"; b and d are new -> appended with their default visibility
+    expect(normalizeLayout({ order: ["c", "z", "a"], hidden: ["z", "a"] }, cols)).toEqual({ order: ["c", "a", "b", "d"], hidden: ["a", "b", "d"] });
+    expect(normalizeLayout(null, cols)).toEqual({ order: ["a", "b", "c", "d"], hidden: ["b", "d"] });
+    expect(normalizeLayout({ order: "bad" as never, hidden: 5 as never }, cols).order).toEqual(["a", "b", "c", "d"]);
+  });
+
+  it("moves a column among the visible ones", () => {
+    const l = { order: ["a", "b", "c", "d"], hidden: ["b"] };
+    expect(moveColumn(l, "c", -1).order).toEqual(["c", "a", "b", "d"]);   // skips hidden b
+    expect(moveColumn(l, "a", 1).order).toEqual(["b", "c", "a", "d"]);
+    expect(moveColumn(l, "a", -1)).toEqual(l);                              // already first
+    expect(moveColumn(l, "d", 1)).toEqual(l);                               // already last
+    expect(moveColumn(l, "b", 1)).toEqual(l);                               // hidden columns do not move
   });
 });

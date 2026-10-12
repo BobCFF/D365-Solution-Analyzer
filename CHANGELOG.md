@@ -2,6 +2,11 @@
 
 All notable changes to this project are recorded here. Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/). The app version lives in `package.json` and is stamped on every in-app audit-log entry.
 
+## [0.8.0] - 2026-10-12
+### Changed
+- **Column menus replace the filter row.** Every column header on the Missing dependencies table has a **⋯ menu**: sort A→Z / Z→A, filter, **move left / right** and **hide column**. Set-like columns (Severity, type, solution, availability, ...) filter with a **multi-select value list** (counts, search for long lists, Select all / none); text columns filter with "contains". A filtered column's ⋯ is highlighted, and Clear filter / Clear column filters reset them. Menus are keyboard-operable (Esc closes and returns focus), stay inside the viewport on phones, and do not close while you scroll their value list.
+- **Columns list** (toolbar): tick which columns to include, Show all, Reset. The column **order and visibility are remembered** per table in the browser and repair themselves when columns are added or removed in later versions.
+
 ## [0.7.0] - 2026-10-12
 ### Added
 - **Analysis page leads with a parsed Missing dependencies table**: one row per missing dependency, merging the platform's own `MissingDependencies` from `solution.xml` with this tool's reference scan (navigation, forms, apps, flows, roles, schema), de-duplicated. Columns: severity, required type, required component (name + key), required solution (name + version, Microsoft/system tag), availability (is the required solution loaded in your workspace?), required by (type, name, where), how to fix; plus optional Status, Parent of required, Required-by type, Relationship and Source. "All findings" is one click away.
