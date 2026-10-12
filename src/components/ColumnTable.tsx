@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
-  activeFilterCount, applyColumnFilters, defaultLayout, distinctValues, isFilterActive, matchesSearch, moveColumn, normalizeLayout, normalizeTableState,
+  activeFilterCount, applyColumnFilters, defaultLayout, distinctValues, isFilterActive, matchesSearch, moveColumn, normalizeLayout, normalizeTableState, clampWidth,
   sortRows, toggleSetValue, type ColDef, type ColumnFilters, type ColumnLayout, type SortState, type TableState,
 } from "@/lib/d365/columnFilter";
 import { useSavedState } from "./uiState";
@@ -21,7 +21,7 @@ const MAX_ROWS = 2000;
  * header menu. All of it is remembered per user (see uiState) under `table:<id>`.
  */
 export function useColumnTable<T>(id: string, columns: TableColumn<T>[], opts: { initialFilters?: ColumnFilters; initialSort?: SortState | null } = {}) {
-  const fallback: TableState = { filters: opts.initialFilters ?? {}, sort: opts.initialSort ?? null, layout: null, search: "" };
+  const fallback: TableState = { filters: opts.initialFilters ?? {}, sort: opts.initialSort ?? null, layout: null, search: "", widths: {} };
   const [state, setState] = useSavedState<TableState>(`table:${id}`, fallback, (raw) => normalizeTableState(raw, columns, fallback));
   const layout: ColumnLayout = useMemo(() => normalizeLayout(state.layout ?? defaultLayout(columns), columns), [state.layout, columns]);
   const hidden = useMemo(() => new Set(layout.hidden), [layout.hidden]);
@@ -37,6 +37,13 @@ export function useColumnTable<T>(id: string, columns: TableColumn<T>[], opts: {
     setFilters: (f: ColumnFilters | ((p: ColumnFilters) => ColumnFilters)) => setState((s) => ({ ...s, filters: typeof f === "function" ? f(s.filters) : f })),
     setSort: (v: SortState | null | ((p: SortState | null) => SortState | null)) => setState((s) => ({ ...s, sort: typeof v === "function" ? v(s.sort) : v })),
     setSearch: (search: string) => setState((s) => ({ ...s, search })),
+    widths: state.widths,
+    sized: Object.keys(state.widths).some((k) => visible.some((c) => c.key === k)),
+    setWidths: (w: Record<string, number>) => setState((s) => ({ ...s, widths: w })),
+    resetWidths: () => setState((s) => ({ ...s, widths: {} })),
+    /** table style once any column has been resized: fixed layout, exact total width (extra = fixed non-data columns) */
+    tableStyle: (extra = 0): CSSProperties | undefined => Object.keys(state.widths).some((k) => visible.some((c) => c.key === k))
+      ? { width: visible.reduce((n, c) => n + (state.widths[c.key] ?? 160), extra) } : undefined,
     saveLayout: (l: ColumnLayout) => setState((s) => ({ ...s, layout: l })),
     toggleCol: (key: string) => setState((s) => { const l = normalizeLayout(s.layout ?? defaultLayout(columns), columns); const h = new Set(l.hidden); if (h.has(key)) h.delete(key); else h.add(key); return { ...s, layout: { order: l.order, hidden: [...h] } }; }),
     closeMenu: (restoreFocus = true) => { setMenu(null); if (restoreFocus) opener.current?.focus(); },
@@ -57,17 +64,41 @@ export function useColumnTable<T>(id: string, columns: TableColumn<T>[], opts: {
 }
 export type ColumnTableApi<T> = ReturnType<typeof useColumnTable<T>>;
 
+/** Drag (or ←/→) to resize a column; double-click resets all widths. The first drag freezes the other columns at their current width. */
+function ResizeHandle<T>({ api, col }: { api: ColumnTableApi<T>; col: TableColumn<T> }) {
+  const base = (th: HTMLElement) => {
+    const out: Record<string, number> = { ...api.widths };
+    th.closest("tr")?.querySelectorAll<HTMLElement>("th[data-col]").forEach((h) => { const k = h.dataset.col!; if (out[k] === undefined) out[k] = clampWidth(h.offsetWidth); });
+    return out;
+  };
+  const down = (e: React.PointerEvent<HTMLElement>) => {
+    e.preventDefault(); e.stopPropagation();
+    const th = e.currentTarget.closest("th")!; const start = base(th); const x0 = e.clientX;
+    const move = (ev: PointerEvent) => api.setWidths({ ...start, [col.key]: clampWidth(start[col.key] + ev.clientX - x0) });
+    const up = () => { document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up); document.removeEventListener("pointercancel", up); };
+    document.addEventListener("pointermove", move); document.addEventListener("pointerup", up); document.addEventListener("pointercancel", up);
+  };
+  const key = (e: React.KeyboardEvent<HTMLElement>) => {
+    const d = e.key === "ArrowLeft" ? -16 : e.key === "ArrowRight" ? 16 : 0;
+    if (!d) return;
+    e.preventDefault(); const w = base(e.currentTarget.closest("th")!); api.setWidths({ ...w, [col.key]: clampWidth(w[col.key] + d) });
+  };
+  return <span className="colresize" role="separator" aria-orientation="vertical" tabIndex={0} aria-label={`Resize ${col.label} column (arrow keys; double-click resets widths)`}
+    onPointerDown={down} onKeyDown={key} onDoubleClick={api.resetWidths} />;
+}
+
 /** A header cell: sort button + ⋯ column menu trigger. */
 export function ColumnHeader<T>({ api, col }: { api: ColumnTableApi<T>; col: TableColumn<T> }) {
   const on = isFilterActive(api.filters[col.key]);
   const sorted = api.sort?.key === col.key ? api.sort.dir : 0;
   return (
-    <th aria-sort={sorted === 1 ? "ascending" : sorted === -1 ? "descending" : "none"}>
+    <th data-col={col.key} style={api.sized ? { width: api.widths[col.key] ?? 160 } : undefined} aria-sort={sorted === 1 ? "ascending" : sorted === -1 ? "descending" : "none"}>
       <div className="thwrap">
         <button className="thbtn" onClick={() => api.setSort((s) => (s?.key === col.key ? (s.dir === 1 ? { key: col.key, dir: -1 } : null) : { key: col.key, dir: 1 }))}>{col.label}{sorted === 1 ? " ▲" : sorted === -1 ? " ▼" : ""}</button>
         <button className={`thmenu${on ? " on" : ""}`} aria-haspopup="menu" aria-expanded={api.menu?.key === col.key}
           aria-label={`${col.label} column options${on ? " (filtered)" : ""}`} onClick={(e) => api.openMenu(col.key, e.currentTarget)}>⋯</button>
       </div>
+      <ResizeHandle api={api} col={col} />
     </th>
   );
 }
@@ -151,7 +182,7 @@ export function TableToolbar<T>({ api, total, shown, onExport, extra }: { api: C
       <MenuButton small ariaLabel="Choose columns" label={<>Columns ({visible.length}/{columns.length})</>}>
         <div className="multi-pop" role="group" aria-label="Columns to include">
           <p className="faint" style={{ margin: "0 0 6px" }}>Tick the columns to include. Use ⋯ on a header to move or hide one.</p>
-          <div className="row"><button className="btn ghost sm" onClick={() => api.saveLayout({ order: layout.order, hidden: [] })}>Show all</button><button className="btn ghost sm" onClick={() => api.saveLayout(defaultLayout(columns))}>Reset</button></div>
+          <div className="row"><button className="btn ghost sm" onClick={() => api.saveLayout({ order: layout.order, hidden: [] })}>Show all</button><button className="btn ghost sm" onClick={() => { api.saveLayout(defaultLayout(columns)); api.resetWidths(); }}>Reset</button></div>
           <ul>{layout.order.map((k) => byKey.get(k)).filter((c): c is TableColumn<T> => !!c).map((c) => (
             <li key={c.key}><label className="row"><input type="checkbox" checked={!hidden.has(c.key)} disabled={!hidden.has(c.key) && visible.length === 1} onChange={() => api.toggleCol(c.key)} /> {c.label}</label></li>
           ))}</ul>
@@ -177,8 +208,8 @@ export function ColumnTable<T>({ id, rows, columns, rowKey, exportName, rowClass
 
   return (<div>
     <TableToolbar api={api} total={rows.length} shown={shown.length} onExport={() => downloadCsv(exportName, [api.visible.map((c) => c.label), ...shown.map((r) => api.visible.map((c) => c.get(r)))])} />
-    <div className="tablewrap"><table className="coltable">
-      <thead><tr>{api.visible.map((c) => <ColumnHeader key={c.key} api={api} col={c} />)}{rowActions && <th>{actionsLabel ?? ""}</th>}</tr></thead>
+    <div className="tablewrap"><table className={`coltable${api.sized ? " sized" : ""}`} style={api.tableStyle(rowActions ? 110 : 0)}>
+      <thead><tr>{api.visible.map((c) => <ColumnHeader key={c.key} api={api} col={c} />)}{rowActions && <th style={api.sized ? { width: 110 } : undefined}>{actionsLabel ?? ""}</th>}</tr></thead>
       <tbody>
         {capped.map((r) => (
           <tr key={rowKey(r)} className={`${rowClass?.(r) ?? ""}${onRowClick ? " clickable" : ""}`} onClick={onRowClick ? () => onRowClick(r) : undefined}>

@@ -33,6 +33,7 @@ Legend: P0 first, P1 important, P2 nice-to-have.
 - [ ] Accessibility pass (focus trap in dialogs, table semantics).
 
 ## Done
+- [x] 0.10.0 Adjustable (and remembered) column widths on all tables.
 - [x] 0.9.1 Full-width, full-height layout on every page.
 - [x] 0.9.0 Column menus on all tables; remembered page, selection, filters, sorts and column layouts (per account, per browser).
 - [x] 0.8.0 Column ⋯ menus (sort, multi-select filter, move, hide) and a Columns list with remembered layout.
