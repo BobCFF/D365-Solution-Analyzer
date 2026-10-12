@@ -2,6 +2,10 @@
 
 All notable changes to this project are recorded here. Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/). The app version lives in `package.json` and is stamped on every in-app audit-log entry.
 
+## [0.9.1] - 2026-10-12
+### Changed
+- Pages now use the full browser width and height (no centred 1,200px column); tables, the Compare grid and the flow diagram grow with the window instead of fixed heights. Legal pages keep a readable line width.
+
 ## [0.9.0] - 2026-10-12
 ### Added
 - **Column menus on every table.** The ⋯ header menu (sort, multi-select / contains filter, move left/right, hide), the Columns list, quick search and CSV export now apply to the **Solutions list, Data Dictionary, Dependencies, Security (privileges and field permissions), Change log, the Compare grid** (tree, ticking and the detail pane keep working; filters expand matching parents) and the Compare **Uses / Used by** tables, in addition to the Analysis table. The Dependencies table starts filtered to what needs attention. Tables show up to 2,000 rows (with a note and CSV export for the rest). Extra Data Dictionary columns (primary key, custom, secured, option set, max length) and a Patch parent column are available from the Columns list.
