@@ -1,4 +1,5 @@
 import JSZip from "jszip";
+import { labelFor } from "@/lib/progressLabels";
 import { matchesSearch, normalizeTableState } from "@/lib/d365/columnFilter";
 import { defaultLayout, moveColumn, normalizeLayout, toggleSetValue } from "@/lib/d365/columnFilter";
 import { parseSolutionRef, typeLabel, buildMissingRows } from "@/lib/d365/missingDeps";
@@ -404,5 +405,16 @@ describe("saved table state (0.9.0)", () => {
     const row = { a: "Alpha", b: "Beta" };
     const c2: ColDef<typeof row>[] = [{ key: "a", label: "A", filter: "text", get: (r) => r.a }, { key: "b", label: "B", filter: "text", get: (r) => r.b }];
     expect(matchesSearch(row, c2, "BET")).toBe(true); expect(matchesSearch(row, c2, "zzz")).toBe(false); expect(matchesSearch(row, c2, "  ")).toBe(true);
+  });
+});
+
+describe("busy dialog wording (0.11.0)", () => {
+  it("labels API calls by path and method", () => {
+    expect(labelFor("/api/solutions", "POST")).toBe("Saving solution (encrypted)");
+    expect(labelFor("/api/solutions")).toBe("Loading your solutions");
+    expect(labelFor("/api/solutions/abc", "DELETE")).toBe("Deleting solution");
+    expect(labelFor("/api/solutions/abc/dependencies?x=1")).toBe("Resolving dependencies");
+    expect(labelFor("/api/account", "DELETE")).toBe("Deleting all your data");
+    expect(labelFor("/api/unknown")).toBe("Working");
   });
 });

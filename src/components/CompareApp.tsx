@@ -9,6 +9,7 @@ import type { ParsedFlow, ParsedSolution } from "@/lib/d365/types";
 import { FlowDiagram } from "./FlowDiagram";
 import { sortRows } from "@/lib/d365/columnFilter";
 import { asOneOf, asString } from "@/lib/uiStateStore";
+import { useProgress } from "./progress";
 import { ColumnHeader, ColumnMenuLayer, ColumnTable, TableToolbar, useColumnTable, type TableColumn } from "./ColumnTable";
 import { useSavedState } from "./uiState";
 import { downloadCsv } from "./ui";
@@ -51,6 +52,7 @@ export function CompareApp({ solutions, load, onLogged }: {
   const setType = (t: number | null) => setPrefs((p) => ({ ...p, type: t ?? -1 }));
   const tbl = useColumnTable<CompareRow>("compare", COMPARE_COLUMNS);
   const [pair, setPair] = useState<{ src: ParsedSolution; tgt: ParsedSolution } | null>(null);
+  const progress = useProgress();
   const [err, setErr] = useState(""); const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [ticked, setTicked] = useState<Set<string>>(new Set());
@@ -58,11 +60,15 @@ export function CompareApp({ solutions, load, onLogged }: {
   const [pane, setPane] = useState<Pane>("summary");
   const [notice, setNotice] = useState("");
 
-  const run = async () => {
+  const run = () => progress.track("Comparing solutions", async (h) => {
     setBusy(true); setErr(""); setTicked(new Set()); setActive(null); setNotice("");
-    try { const [src, tgt] = await Promise.all([load(srcId), load(tgtId)]); setPair({ src, tgt }); onLogged(srcId, tgtId); }
-    catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
-  };
+    try {
+      h.set({ detail: "Loading the source and target solutions", pct: 20 });
+      const [src, tgt] = await Promise.all([load(srcId), load(tgtId)]);
+      h.set({ detail: "Comparing components and resolving dependencies", pct: 80 });
+      setPair({ src, tgt }); onLogged(srcId, tgtId);
+    } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
+  });
 
   const cmp: Comparison | null = useMemo(() => (pair ? compareSets(pair.src, pair.tgt) : null), [pair]);
   // quick search + column filters become a predicate over rows; a column sort becomes an explicit order
