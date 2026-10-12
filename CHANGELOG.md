@@ -2,6 +2,10 @@
 
 All notable changes to this project are recorded here. Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/). The app version lives in `package.json` and is stamped on every in-app audit-log entry.
 
+## [0.11.1] - 2026-10-12
+### Changed
+- The progress dialog now says "Analyzing and saving solution" (and the upload stage "analyzing for errors, then encrypting and saving") because the error analysis runs while a solution is saved.
+
 ## [0.11.0] - 2026-10-12
 ### Added
 - **Progress dialog whenever the app is working.** Every request to the server (loading solutions, opening one, dependency resolution, import plan, re-run analysis, delete, data export, comparison log) shows a modal "please wait" dialog with a plain-language label. Uploading solutions shows named stages with a percentage per file (reading, unpacking/parsing in the browser, encrypting and saving) and Compare shows its loading/comparing steps. The dialog appears after 0.2 s (no flicker on quick calls), stays at least 0.5 s once shown, cannot be dismissed with Esc, and respects reduced-motion.
