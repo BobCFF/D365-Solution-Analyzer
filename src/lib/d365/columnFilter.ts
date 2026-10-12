@@ -90,7 +90,11 @@ export function moveColumn(layout: ColumnLayout, key: string, dir: -1 | 1): Colu
 
 /* ---- saved per-table state ---- */
 export interface SortState { key: string; dir: 1 | -1 }
-export interface TableState { filters: ColumnFilters; sort: SortState | null; layout: ColumnLayout | null; search: string }
+export interface TableState { filters: ColumnFilters; sort: SortState | null; layout: ColumnLayout | null; search: string; widths: Record<string, number> }
+
+export const MIN_COL_WIDTH = 48;
+export const MAX_COL_WIDTH = 1200;
+export const clampWidth = (w: number) => Math.round(Math.min(MAX_COL_WIDTH, Math.max(MIN_COL_WIDTH, w)));
 
 /** Validate saved table state against the current columns (unknown columns, bad shapes and stale layouts are repaired or dropped). */
 export function normalizeTableState(raw: unknown, cols: { key: string; defaultVisible?: boolean }[], fallback: TableState): TableState {
@@ -108,7 +112,11 @@ export function normalizeTableState(raw: unknown, cols: { key: string; defaultVi
   const s = r.sort as Partial<SortState> | null | undefined;
   const sort = s && typeof s.key === "string" && keys.has(s.key) && (s.dir === 1 || s.dir === -1) ? { key: s.key, dir: s.dir } : null;
   const layout = r.layout && typeof r.layout === "object" ? normalizeLayout(r.layout as Partial<ColumnLayout>, cols) : null;
-  return { filters, sort, layout, search: typeof r.search === "string" ? r.search.slice(0, 500) : "" };
+  const widths: Record<string, number> = {};
+  if (r.widths && typeof r.widths === "object" && !Array.isArray(r.widths)) {
+    for (const [k, v] of Object.entries(r.widths as Record<string, unknown>)) if (keys.has(k) && typeof v === "number" && Number.isFinite(v)) widths[k] = clampWidth(v);
+  }
+  return { filters, sort, layout, search: typeof r.search === "string" ? r.search.slice(0, 500) : "", widths };
 }
 
 /** Quick search: every column's text, case-insensitive. */

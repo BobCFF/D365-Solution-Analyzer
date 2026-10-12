@@ -175,7 +175,7 @@ export function CompareApp({ solutions, load, onLogged }: {
           )}
 
           <div className="tablewrap gs-grid" tabIndex={0} onKeyDown={onKey} aria-label="Comparison results">
-            <table className="coltable"><thead><tr><th style={{ width: 32 }} />{tbl.visible.map((c) => <ColumnHeader key={c.key} api={tbl} col={c} />)}</tr></thead>
+            <table className={`coltable${tbl.sized ? " sized" : ""}`} style={tbl.tableStyle(32)}><thead><tr><th style={{ width: 32 }} />{tbl.visible.map((c) => <ColumnHeader key={c.key} api={tbl} col={c} />)}</tr></thead>
               <tbody>
                 {tree.map(({ row: r, depth, hasChildren, expanded: open }) => (
                   <tr key={r.id} className={`${r.id === active ? "sel" : ""}`} onClick={() => setActive(r.id)}>

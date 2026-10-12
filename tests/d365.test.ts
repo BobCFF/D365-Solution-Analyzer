@@ -383,7 +383,7 @@ describe("column menu logic (0.8.0)", () => {
 
 describe("saved table state (0.9.0)", () => {
   const cols = [{ key: "a" }, { key: "b", defaultVisible: false }, { key: "c" }];
-  const fb = { filters: {}, sort: null, layout: null, search: "" };
+  const fb = { filters: {}, sort: null, layout: null, search: "", widths: {} };
   it("keeps valid state and repairs the rest", () => {
     const ok = normalizeTableState({ filters: { a: ["x"], c: "abc", zzz: "gone" }, sort: { key: "c", dir: -1 }, layout: { order: ["c", "a"], hidden: ["a"] }, search: "hi" }, cols, fb);
     expect(ok.filters).toEqual({ a: ["x"], c: "abc" });                     // unknown column dropped
@@ -394,7 +394,11 @@ describe("saved table state (0.9.0)", () => {
   it("falls back for junk and for sorts on removed columns", () => {
     expect(normalizeTableState("junk", cols, fb)).toBe(fb);
     expect(normalizeTableState(null, cols, fb)).toBe(fb);
-    expect(normalizeTableState({ sort: { key: "removed", dir: 1 }, filters: [1, 2] }, cols, fb)).toEqual({ filters: {}, sort: null, layout: null, search: "" });
+    expect(normalizeTableState({ sort: { key: "removed", dir: 1 }, filters: [1, 2] }, cols, fb)).toEqual({ filters: {}, sort: null, layout: null, search: "", widths: {} });
+  });
+  it("clamps saved column widths and drops unknown or invalid ones", () => {
+    const w = normalizeTableState({ widths: { a: 10, c: 250.4, zzz: 100, b: "wide" } }, cols, fb).widths;
+    expect(w).toEqual({ a: 48, c: 250 });
   });
   it("matches the quick search against every column", () => {
     const row = { a: "Alpha", b: "Beta" };

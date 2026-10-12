@@ -226,6 +226,14 @@ details.multi>summary::-webkit-details-marker{display:none}
 .coltable .thbtn{background:none;border:0;padding:0;font:inherit;font-weight:600;color:var(--ink);cursor:pointer;white-space:nowrap}
 .coltable td.wrap{white-space:normal;min-width:240px}
 
+.coltable th{position:relative}
+.coltable.sized{table-layout:fixed;min-width:100%}
+.coltable.sized th,.coltable.sized td{overflow:hidden;text-overflow:ellipsis}
+.coltable.sized td.wrap{min-width:0}
+.colresize{position:absolute;top:0;right:-3px;width:7px;height:100%;cursor:col-resize;touch-action:none;z-index:1}
+.colresize::after{content:"";position:absolute;top:20%;bottom:20%;left:3px;width:1px;background:var(--border)}
+.colresize:hover::after,.colresize:focus-visible::after{width:3px;left:2px;background:var(--accent)}
+.colresize:focus-visible{outline:none}
 .thwrap{display:flex;align-items:center;justify-content:space-between;gap:4px}
 .thmenu{background:none;border:1px solid transparent;border-radius:6px;color:var(--muted);cursor:pointer;font-size:16px;line-height:1;padding:0 6px;min-width:28px;min-height:24px}
 .thmenu:hover,.thmenu[aria-expanded=true]{background:var(--surface-3);color:var(--ink)}

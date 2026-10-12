@@ -2,6 +2,10 @@
 
 All notable changes to this project are recorded here. Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/). The app version lives in `package.json` and is stamped on every in-app audit-log entry.
 
+## [0.10.0] - 2026-10-12
+### Added
+- **Adjustable column widths** on every table (including the Compare grid): drag the edge of a header, or focus it and use the left/right arrow keys. Double-click an edge, or press Reset in the Columns list, to restore automatic widths. Widths are remembered per account in this browser with the rest of the saved view (clamped to 48-1,200 px; unknown columns ignored).
+
 ## [0.9.1] - 2026-10-12
 ### Changed
 - Pages now use the full browser width and height (no centred 1,200px column); tables, the Compare grid and the flow diagram grow with the window instead of fixed heights. Legal pages keep a readable line width.
