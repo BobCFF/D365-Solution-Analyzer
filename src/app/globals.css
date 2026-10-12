@@ -72,7 +72,7 @@ a{color:var(--accent)}
 .tab.on{background:var(--accent);color:var(--on-accent);font-weight:700}
 .top-actions{display:flex;align-items:center;gap:8px}
 .theme-name{color:var(--muted);font-size:12px}
-main.page{max-width:1200px;margin:0 auto;padding:20px 16px 64px}
+main.page{width:100%;max-width:none;margin:0;padding:20px 24px 48px;min-height:calc(100vh - 52px)}
 .panel{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:var(--shadow);margin-bottom:16px}
 
 /* controls */
@@ -101,7 +101,7 @@ input[type=search],input[type=text],input[type=email],input[type=password],selec
 .lver{color:var(--faint);font-size:12px;margin-top:12px}
 
 /* tables: zebra rows */
-.tablewrap{overflow:auto;border:1px solid var(--border);border-radius:10px;max-height:70vh}
+.tablewrap{overflow:auto;border:1px solid var(--border);border-radius:10px;max-height:max(320px,calc(100vh - 280px))}
 table{width:100%;border-collapse:collapse}
 th,td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--border);vertical-align:top}
 th{background:var(--surface-2);position:sticky;top:0;white-space:nowrap;font-weight:600}
@@ -133,7 +133,7 @@ tr.sel{outline:2px solid var(--accent);outline-offset:-2px}
 .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .spread{justify-content:space-between}
 .empty{padding:32px;text-align:center;color:var(--muted)}
-@media (max-width:640px){.theme-name{display:none}main.page{padding:12px 8px 48px}}
+@media (max-width:640px){.theme-name{display:none}main.page{padding:12px 8px 48px;min-height:calc(100vh - 100px)}}
 
 /* ---- Compare (modelled on Salesforce Analyzer: sidebar + status tabs + tree grid + bottom pane) ---- */
 :root{--add:var(--ok);--del:var(--err)}
@@ -147,7 +147,7 @@ main.page.wide{max-width:none}
 .gs-types button{width:100%;display:flex;justify-content:space-between;gap:8px;text-align:left;background:none;border:0;border-radius:6px;padding:4px 8px;cursor:pointer;color:var(--ink)}
 .gs-types button:hover{background:var(--surface-2)}.gs-types button.on{background:var(--accent-soft);font-weight:600}
 .pill{background:var(--surface-3);border-radius:999px;padding:0 7px;font-size:12px;color:var(--ink-2)}
-.gs-grid{max-height:48vh}
+.gs-grid{max-height:max(280px,calc(100vh - 400px))}
 .gs-grid:focus-visible{outline:2px solid var(--accent)}
 .gs-pane{margin-top:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface);padding:12px}
 .gs-deps h2{margin-top:12px}
@@ -173,7 +173,7 @@ tr.chg>th,tr.chg>td{background:color-mix(in srgb,var(--warn) 10%,transparent)}
 .plan{margin:6px 0 0 20px;padding:0}.plan li{margin:3px 0}
 
 /* ---- Flow diagram ---- */
-.fd-body{display:flex;border:1px solid var(--border);border-radius:10px;background:var(--surface);overflow:hidden;min-height:420px;height:60vh}
+.fd-body{display:flex;border:1px solid var(--border);border-radius:10px;background:var(--surface);overflow:hidden;min-height:420px;height:max(420px,calc(100vh - 260px))}
 .fd-svg{flex:1;width:100%;height:100%;cursor:grab;touch-action:none;background:radial-gradient(color-mix(in srgb,var(--faint) 30%,transparent) 1px,transparent 1px) 0 0/22px 22px}
 .fd-svg:active{cursor:grabbing}.fd-svg:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .fd-detail{width:280px;border-left:1px solid var(--border);padding:12px;overflow:auto;background:var(--surface)}
