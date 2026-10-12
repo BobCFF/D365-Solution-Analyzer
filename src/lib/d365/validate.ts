@@ -36,7 +36,7 @@ export const parsedSolutionSchema = z.object({
   parentSolutionName: str(200).nullable().default(null),
   publisher: z.object({ uniqueName: str(200), customizationPrefix: str(50), customizationOptionValuePrefix: z.number().int().nullable() }).nullable().default(null),
   rootComponents: arr(z.object({ type: int, key: str(1000), behavior: int })),
-  missingDependencies: arr(z.object({ requiredType: str(200), requiredName: str(500), requiredSolution: str(200), dependentType: str(200), dependentName: str(500) })),
+  missingDependencies: arr(z.object({ requiredType: str(200), requiredName: str(500), requiredSolution: str(200), dependentType: str(200), dependentName: str(500), requiredKey: str(500).optional(), requiredParent: str(500).optional(), requiredSolutionName: str(200).optional(), requiredSolutionVersion: str(50).optional(), dependentKey: str(500).optional(), dependentParent: str(500).optional() })),
   inventory: arr(z.object({ type: int, typeName: str(200), key: str(1000), displayName: str(500).optional(), details: detail.optional() })),
   entities: arr(z.object({ logical: str(200), display: str(500), prefix: str(50), attributes: arr(attribute, 5000) })).optional(),
   relationships: arr(z.object({ name: str(300), type: str(50), referenced: str(200), referencing: str(200), attribute: str(200), category: z.enum(["business", "ownership", "audit", "portal", "generic"]) })).optional(),

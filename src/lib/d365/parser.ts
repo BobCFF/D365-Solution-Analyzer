@@ -2,6 +2,7 @@ import JSZip from "jszip";
 import { arr, findAll, guid, text, xml } from "./xml";
 import { parseApps, parseSiteMaps, webResourceName } from "./navigation";
 import { parseFlowJson } from "./flow";
+import { parseSolutionRef } from "./missingDeps";
 import { componentTypeName } from "./componentTypes";
 import { CT_CONNECTION_REFERENCE } from "./types";
 import type {
@@ -98,13 +99,25 @@ export function parseSolutionXml(content: string): ParsedSolution {
     behavior: Number(rc["@_behavior"] ?? 0),
   }));
 
-  const missingDependencies: MissingDependency[] = arr(root.MissingDependencies?.MissingDependency).map((md) => ({
-    requiredType: String(md.Required?.["@_type"] ?? ""),
-    requiredName: String(md.Required?.["@_displayName"] ?? md.Required?.["@_key"] ?? ""),
-    requiredSolution: String(md.Required?.["@_solution"] ?? ""),
-    dependentType: String(md.Dependent?.["@_type"] ?? ""),
-    dependentName: String(md.Dependent?.["@_displayName"] ?? md.Dependent?.["@_key"] ?? ""),
-  }));
+  const missingDependencies: MissingDependency[] = arr(root.MissingDependencies?.MissingDependency).map((md) => {
+    const r = md.Required ?? {}, d = md.Dependent ?? {};
+    const requiredSolution = String(r["@_solution"] ?? "");
+    const sol = parseSolutionRef(requiredSolution);
+    const pick = (n: any, ...names: string[]) => { for (const k of names) { const v = n?.[`@_${k}`]; if (v !== undefined && String(v) !== "") return String(v); } return ""; };
+    return {
+      requiredType: String(r["@_type"] ?? ""),
+      requiredName: pick(r, "displayName", "schemaName", "key", "id"),
+      requiredSolution,
+      requiredKey: pick(r, "schemaName", "key", "id") || undefined,
+      requiredParent: pick(r, "parentDisplayName", "parentSchemaName") || undefined,
+      requiredSolutionName: sol.name || undefined,
+      requiredSolutionVersion: sol.version || undefined,
+      dependentType: String(d["@_type"] ?? ""),
+      dependentName: pick(d, "displayName", "schemaName", "key", "id"),
+      dependentKey: pick(d, "schemaName", "key", "id") || undefined,
+      dependentParent: pick(d, "parentDisplayName", "parentSchemaName") || undefined,
+    };
+  });
 
   const uniqueName = text(root.UniqueName);
   let parentSolutionName: string | null = null;

@@ -1,5 +1,6 @@
 import { componentTypeName } from "./componentTypes";
 import { resolveReferences } from "./dependencies";
+import { parseSolutionRef } from "./missingDeps";
 import type { Finding, ParsedSolution, Severity } from "./types";
 import { compareVersions, parseVersion } from "./version";
 
@@ -8,6 +9,7 @@ export interface AnalyzeContext {
   others?: ParsedSolution[];
 }
 
+const solName = (md: ParsedSolution["missingDependencies"][number]) => md.requiredSolutionName ?? parseSolutionRef(md.requiredSolution).name;
 const sameKey = (a: { type: number; key: string }, b: { type: number; key: string }) =>
   a.type === b.type && a.key.toLowerCase() === b.key.toLowerCase();
 
@@ -81,7 +83,7 @@ export function analyzeSolution(sol: ParsedSolution, ctx: AnalyzeContext = {}): 
       remediation: md.requiredSolution
         ? `Import solution "${md.requiredSolution}" into the target first, or add the required component to this solution.`
         : "Add the required component to the solution (Add required components) or install the solution that provides it.",
-      componentKey: md.requiredName, ...(md.requiredSolution ? { solutions: [md.requiredSolution] } : {}) });
+      componentKey: md.requiredName, ...(solName(md) ? { solutions: [solName(md)] } : {}) });
   }
 
   // --- Duplicate root components ----------------------------------------

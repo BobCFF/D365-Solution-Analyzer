@@ -26,12 +26,14 @@ Legend: P0 first, P1 important, P2 nice-to-have.
 - [ ] Compare: saved comparisons, column filters/menus, virtualized rows, 3-way (base) compare, side-by-side XML diff.
 
 ## P2
+- [ ] Use `ColumnTable` for the Data Dictionary, Dependencies and Compare grids (per-column filters everywhere).
 - [ ] ERD view of a loaded solution (deep-link into D365 ERD Builder or embed).
 - [ ] Group by publisher prefix with colors; relationship category filters.
 - [ ] Table-level security matrix compare across roles; XLSX export.
 - [ ] Accessibility pass (focus trap in dialogs, table semantics).
 
 ## Done
+- [x] 0.7.0 Missing-dependencies table with per-column filters on the Analysis page; reusable ColumnTable.
 - [x] 0.6.0 Analysis filters: severity, category, search, referenced-solutions dropdown, hide Microsoft/system solutions.
 - [x] 0.5.0 Review adoption: zod payload validation, abuse limits, API guard, getClaims, withUser/log/env helpers, Status panel, export, privacy/terms/LICENSE, ESLint, native dialogs, login + contrast fixes (see docs/REVIEW-ADOPTION.md).
 - [x] 0.4.0 Encrypted storage, FORCE RLS + revoked grants, nonce CSP + HSTS, allow-list, erase-all-data, docs/SECURITY.md.

@@ -17,9 +17,17 @@ export interface RootComponent {
 export interface MissingDependency {
   requiredType: string;
   requiredName: string;
+  /** as written in solution.xml, usually "UniqueName (1.0.0.0)" */
   requiredSolution: string;
   dependentType: string;
   dependentName: string;
+  /** Added in 0.7.0 (absent on rows stored earlier) */
+  requiredKey?: string;
+  requiredParent?: string;
+  requiredSolutionName?: string;
+  requiredSolutionVersion?: string;
+  dependentKey?: string;
+  dependentParent?: string;
 }
 
 /** Item discovered in customizations.xml (entity, workflow, web resource, ...). */

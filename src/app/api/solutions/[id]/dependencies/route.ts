@@ -11,8 +11,9 @@ export const GET = withUser(async (_req, ctx, params) => {
   const s = await getSolution(ctx, params.id);
   if (!s) throw new HttpError("Not found", 404, "not_found");
   const others = (await loadParsed(ctx, params.id)).map((o) => o.parsed);
+  const loaded = [...new Set(others.map((o) => o.uniqueName))].sort();
   const resolved = resolveReferences(s.parsed, others).filter((r) => r.status !== "internal" || /^(nav|flow|form|app)-/.test(r.ref.kind));
   const counts: Record<string, number> = {};
   for (const r of resolved) counts[r.status] = (counts[r.status] ?? 0) + 1;
-  return NextResponse.json({ resolved: resolved.slice(0, 5000), counts, truncated: resolved.length > 5000 });
+  return NextResponse.json({ resolved: resolved.slice(0, 5000), counts, truncated: resolved.length > 5000, loaded });
 });

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, errMsg, makeApi } from "@/lib/api-client";
+import { buildMissingRows } from "@/lib/d365/missingDeps";
 import type { ImportPlan } from "@/lib/d365/dependencies";
 import { parseSolutionZip } from "@/lib/d365/parser";
 import type { ParsedSolution } from "@/lib/d365/types";
@@ -99,7 +100,7 @@ export function Dashboard({ token, email, onSignOut }: { token: string; email: s
 
   // Dependency data depends on everything loaded, so refetch when the selection or the loaded set changes.
   useEffect(() => {
-    if (!selected || !(tab === "deps" || tab === "navigation" || tab === "flows")) return;
+    if (!selected || !(tab === "analysis" || tab === "deps" || tab === "navigation" || tab === "flows")) return;
     let live = true;
     api<DepsPayload>(`/api/solutions/${selected}/dependencies`).then((d) => live && setDepsState({ id: selected, data: d })).catch((e) => live && setError(errMsg(e)));
     if (tab === "deps") api<ImportPlan>("/api/import-plan").then((p) => live && setPlan(p)).catch(() => {});
@@ -108,6 +109,7 @@ export function Dashboard({ token, email, onSignOut }: { token: string; email: s
 
   // dependency data of the selected solution (stale data stays visible while a refresh is in flight)
   const deps = depsState && depsState.id === selected ? depsState.data : null;
+  const missingRows = useMemo(() => (parsed ? buildMissingRows(parsed, deps?.resolved ?? null, deps?.loaded ?? null) : []), [parsed, deps]);
   const needsSelection = (tab === "analysis" || tab === "deps" || tab === "navigation" || tab === "flows" || tab === "dictionary" || tab === "security");
 
   return (
@@ -147,7 +149,7 @@ export function Dashboard({ token, email, onSignOut }: { token: string; email: s
           </div>
         )}
         {needsSelection && !parsed && <div className="panel empty">Load or choose a solution to see this view.</div>}
-        {tab === "analysis" && parsed && <AnalysisView key={selected} findings={findings} onRerun={rerun} busy={busy} />}
+        {tab === "analysis" && parsed && <AnalysisView key={selected} findings={findings} missing={missingRows} depsLoading={!deps} onRerun={rerun} busy={busy} />}
         {tab === "deps" && parsed && <DependenciesView sol={parsed} deps={deps} plan={plan} />}
         {tab === "navigation" && parsed && <NavigationView sol={parsed} deps={deps} />}
         {tab === "flows" && parsed && <FlowsView key={selected} sol={parsed} deps={deps} />}

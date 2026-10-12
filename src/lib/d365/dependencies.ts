@@ -1,3 +1,4 @@
+import { parseSolutionRef } from "./missingDeps";
 import { webResourceName } from "./navigation";
 import { CT_CONNECTION_REFERENCE, type ParsedSolution, type Reference } from "./types";
 import { compareVersions, parseVersion } from "./version";
@@ -162,7 +163,7 @@ export function planImportOrder(sols: ParsedSolution[]): ImportPlan {
   for (const s of list) {
     if (s.parentSolutionName && deps.has(s.parentSolutionName)) deps.get(s.uniqueName)!.add(s.parentSolutionName);
     for (const r of resolveReferences(s, list)) if (r.status === "other" && r.providedBy && r.providedBy !== s.uniqueName) deps.get(s.uniqueName)!.add(r.providedBy);
-    for (const m of s.missingDependencies) if (m.requiredSolution && deps.has(m.requiredSolution)) deps.get(s.uniqueName)!.add(m.requiredSolution);
+    for (const m of s.missingDependencies) { const n = m.requiredSolutionName ?? parseSolutionRef(m.requiredSolution).name; if (n && deps.has(n)) deps.get(s.uniqueName)!.add(n); }
   }
   const order: ImportPlan["order"] = [];
   const done = new Set<string>();
