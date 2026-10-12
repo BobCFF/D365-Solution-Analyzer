@@ -147,7 +147,7 @@ export function Dashboard({ token, email, onSignOut }: { token: string; email: s
           </div>
         )}
         {needsSelection && !parsed && <div className="panel empty">Load or choose a solution to see this view.</div>}
-        {tab === "analysis" && parsed && <AnalysisView findings={findings} onRerun={rerun} busy={busy} />}
+        {tab === "analysis" && parsed && <AnalysisView key={selected} findings={findings} onRerun={rerun} busy={busy} />}
         {tab === "deps" && parsed && <DependenciesView sol={parsed} deps={deps} plan={plan} />}
         {tab === "navigation" && parsed && <NavigationView sol={parsed} deps={deps} />}
         {tab === "flows" && parsed && <FlowsView key={selected} sol={parsed} deps={deps} />}

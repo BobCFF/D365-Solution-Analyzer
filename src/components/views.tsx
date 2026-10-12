@@ -5,10 +5,11 @@ import type { AccessLevel, ParsedSolution } from "@/lib/d365/types";
 import { useEffect } from "react";
 import type { Api } from "@/lib/api-client";
 import { errMsg } from "@/lib/api-client";
+import { categoryOf, filterFindings, isSystemSolution } from "@/lib/d365/findingMeta";
 import { downloadCsv, SEV_ORDER } from "./ui";
 
 export interface SolutionRow { id: string; unique_name: string; friendly_name: string; version: string; managed: boolean; parent_solution_name: string | null; file_name: string; created_at: string }
-export interface FindingRow { id: number; rule_id: string; severity: "error" | "warning" | "info"; title: string; detail: string; remediation: string | null }
+export interface FindingRow { id: number; rule_id: string; severity: "error" | "warning" | "info"; title: string; detail: string; remediation: string | null; solutions?: string[] }
 export interface LogRow { id: number; action: string; summary: string; app_version: string | null; created_at: string }
 
 export const solutionLabel = (s: SolutionRow) => `${s.unique_name} ${s.version} (${s.managed ? "managed" : "unmanaged"}${s.parent_solution_name ? ", patch" : ""})`;
@@ -43,25 +44,80 @@ export function SolutionsView({ solutions, selected, onSelect, onDelete }: {
   );
 }
 
+const HIDE_SYSTEM_KEY = "d365-sa-hide-system";
+function readHideSystem(): boolean { try { return localStorage.getItem(HIDE_SYSTEM_KEY) === "1"; } catch { return false; } }
+
+/**
+ * Findings with filters: severity, category, text, and the other solutions a finding refers to (required solution,
+ * overlapping solution, patch parent). Microsoft/system solutions can be hidden in one click, or solutions picked
+ * individually. Findings that do not reference another solution are always shown.
+ */
 export function AnalysisView({ findings, onRerun, busy }: { findings: FindingRow[]; onRerun: () => void; busy: boolean }) {
   const [sev, setSev] = useState<"all" | FindingRow["severity"]>("all");
+  const [category, setCategory] = useState("");
+  const [q, setQ] = useState("");
+  const [hideSystem, setHideSystem] = useState(readHideSystem);
+  const [excluded, setExcluded] = useState<Set<string>>(new Set());
+
+  const refs = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const f of findings) for (const n of f.solutions ?? []) m.set(n, (m.get(n) ?? 0) + 1);
+    return [...m].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [findings]);
+  const included = (name: string) => !excluded.has(name) && !(hideSystem && isSystemSolution(name));
+  const categories = useMemo(() => [...new Set(findings.map((f) => categoryOf(f.rule_id)))].sort(), [findings]);
+
+  const shown = useMemo(
+    () => filterFindings(findings, { category, q, excluded, hideSystem }).sort((a, b) => SEV_ORDER[a.severity] - SEV_ORDER[b.severity]),
+    [findings, category, q, excluded, hideSystem],
+  );
+
+  const bySev = filterFindings(shown, { severity: sev });
   const counts = { error: 0, warning: 0, info: 0 };
-  for (const f of findings) counts[f.severity]++;
-  const shown = findings.filter((f) => sev === "all" || f.severity === sev).sort((a, b) => SEV_ORDER[a.severity] - SEV_ORDER[b.severity]);
+  for (const f of shown) counts[f.severity]++;
+  const hidden = findings.length - shown.length;
+  const filtered = Boolean(category || q || excluded.size || hideSystem || sev !== "all");
+  const toggleSolution = (n: string) => setExcluded((s) => { const x = new Set(s); if (x.has(n)) x.delete(n); else x.add(n); return x; });
+  const setHide = (v: boolean) => { setHideSystem(v); try { localStorage.setItem(HIDE_SYSTEM_KEY, v ? "1" : "0"); } catch { /* storage unavailable */ } };
+  const clear = () => { setSev("all"); setCategory(""); setQ(""); setExcluded(new Set()); setHide(false); };
+  const includedCount = refs.filter(([n]) => included(n)).length;
+
   return (<div>
     <div className="toolbar">
       <div className="summary" style={{ margin: 0 }}>
         <span className="chip error">{counts.error} errors</span><span className="chip warning">{counts.warning} warnings</span><span className="chip info">{counts.info} info</span>
       </div>
       <span className="grow" />
-      <div className="seg" role="group" aria-label="Severity filter">{(["all", "error", "warning", "info"] as const).map((v) => <button key={v} aria-pressed={sev === v} className={sev === v ? "on" : ""} onClick={() => setSev(v)}>{v}</button>)}</div>
       <button className="btn ghost" disabled={busy} onClick={onRerun} title="Re-check against everything currently loaded (e.g. after loading a parent solution)">Re-run</button>
-      <button className="btn ghost" disabled={!findings.length} onClick={() => downloadCsv("findings.csv", [["Rule", "Severity", "Title", "Detail", "Remediation"], ...findings.map((f) => [f.rule_id, f.severity, f.title, f.detail, f.remediation ?? ""])])}>Export CSV</button>
+      <button className="btn ghost" disabled={!bySev.length} onClick={() => downloadCsv("findings.csv", [["Rule", "Category", "Severity", "Title", "Detail", "Remediation", "Referenced solutions"], ...bySev.map((f) => [f.rule_id, categoryOf(f.rule_id), f.severity, f.title, f.detail, f.remediation ?? "", (f.solutions ?? []).join("; ")])])}>Export CSV{filtered ? " (filtered)" : ""}</button>
     </div>
+    <div className="toolbar filters">
+      <div className="seg" role="group" aria-label="Severity filter">{(["all", "error", "warning", "info"] as const).map((v) => <button key={v} aria-pressed={sev === v} className={sev === v ? "on" : ""} onClick={() => setSev(v)}>{v}</button>)}</div>
+      <input type="search" placeholder="Search findings…" aria-label="Search findings" value={q} onChange={(e) => setQ(e.target.value)} />
+      <select aria-label="Category" value={category} onChange={(e) => setCategory(e.target.value)}>
+        <option value="">All categories</option>{categories.map((c) => <option key={c}>{c}</option>)}
+      </select>
+      <details className="multi">
+        <summary className="btn ghost" aria-label="Filter by referenced solutions">Solutions ({refs.length ? `${includedCount} of ${refs.length}` : "none referenced"})</summary>
+        <div className="multi-pop" role="group" aria-label="Referenced solutions">
+          <label className="row"><input type="checkbox" checked={hideSystem} onChange={(e) => setHide(e.target.checked)} /> <b>Hide Microsoft / system solutions</b></label>
+          <p className="faint" style={{ margin: "4px 0 8px" }}>Findings that don&apos;t refer to another solution are always shown.</p>
+          {refs.length > 0 && <div className="row"><button className="btn ghost sm" onClick={() => setExcluded(new Set())}>Select all</button><button className="btn ghost sm" onClick={() => setExcluded(new Set(refs.map(([n]) => n)))}>Select none</button></div>}
+          <ul>{refs.map(([n, c]) => (
+            <li key={n}><label className="row"><input type="checkbox" checked={included(n)} disabled={hideSystem && isSystemSolution(n)} onChange={() => toggleSolution(n)} /> <span className="mono">{n}</span> <span className="pill">{c}</span>{isSystemSolution(n) && <span className="faint"> Microsoft/system</span>}</label></li>
+          ))}</ul>
+          {!refs.length && <p className="muted">None of the findings refer to another solution.</p>}
+        </div>
+      </details>
+      {filtered && <button className="btn ghost sm" onClick={clear}>Clear filters</button>}
+    </div>
+    {hidden > 0 && <p className="muted" role="status">{hidden} finding(s) hidden by the solution and category filters.</p>}
     {!findings.length && <div className="panel empty"><span className="chip ok">No issues found</span></div>}
-    {shown.map((f) => (
+    {findings.length > 0 && !bySev.length && <div className="panel empty">No findings match these filters.</div>}
+    {bySev.map((f) => (
       <div className={`finding ${f.severity}`} key={f.id}>
-        <b>{f.title}</b> <span className="rule">{f.rule_id}</span>
+        <b>{f.title}</b> <span className="rule">{f.rule_id}</span> <span className="faint">{categoryOf(f.rule_id)}</span>
+        {(f.solutions?.length ?? 0) > 0 && <span className="faint"> · solution{f.solutions!.length > 1 ? "s" : ""}: {f.solutions!.join(", ")}</span>}
         <div>{f.detail}</div>{f.remediation && <div className="fix">Fix: {f.remediation}</div>}
       </div>
     ))}

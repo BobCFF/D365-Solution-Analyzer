@@ -7,6 +7,7 @@ Legend: P0 first, P1 important, P2 nice-to-have.
 - [ ] Validate parser/rules against several real exported solutions and patches (confirm patch XML markers).
 
 ## P1
+- [ ] Analysis scope: choose which loaded solutions count as "available" when checking dependencies (server-side re-run), beyond the display filters added in 0.6.0; user-editable list of system solutions.
 - [ ] Sample solution + "Explore a sample" for first-run onboarding (ERD Builder / Salesforce U5).
 - [ ] Parse in a Web Worker with progress for very large packages (ERD BUG-3, Salesforce PL5).
 - [ ] Virtualize the Compare grid, Dependencies and Dictionary tables (Salesforce N1).
@@ -31,6 +32,7 @@ Legend: P0 first, P1 important, P2 nice-to-have.
 - [ ] Accessibility pass (focus trap in dialogs, table semantics).
 
 ## Done
+- [x] 0.6.0 Analysis filters: severity, category, search, referenced-solutions dropdown, hide Microsoft/system solutions.
 - [x] 0.5.0 Review adoption: zod payload validation, abuse limits, API guard, getClaims, withUser/log/env helpers, Status panel, export, privacy/terms/LICENSE, ESLint, native dialogs, login + contrast fixes (see docs/REVIEW-ADOPTION.md).
 - [x] 0.4.0 Encrypted storage, FORCE RLS + revoked grants, nonce CSP + HSTS, allow-list, erase-all-data, docs/SECURITY.md.
 - [x] 0.3.0 Missing-dependency engine, navigation analysis, flow visualizer + diff, Salesforce-Analyzer-style compare, import-order planner.

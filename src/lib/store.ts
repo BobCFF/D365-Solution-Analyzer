@@ -12,7 +12,7 @@ export interface SolutionMeta {
   parentSolutionName: string | null; publisherName: string | null; publisherPrefix: string | null; fileName: string;
 }
 export interface SolutionSummary { id: string; unique_name: string; friendly_name: string; version: string; managed: boolean; parent_solution_name: string | null; publisher_prefix: string | null; file_name: string; created_at: string }
-export interface FindingPayload { title: string; detail: string; remediation: string | null; componentKey: string | null }
+export interface FindingPayload { title: string; detail: string; remediation: string | null; componentKey: string | null; solutions?: string[] }
 
 const metaOf = (p: ParsedSolution, fileName: string): SolutionMeta => ({
   uniqueName: p.uniqueName, friendlyName: p.friendlyName, version: p.version, managed: p.managed, parentSolutionName: p.parentSolutionName,
@@ -79,7 +79,7 @@ export async function readFindings(ctx: Ctx, solutionId: string) {
   if (error) throw new Error(error.message);
   return (data ?? []).map((r) => {
     const p = unsealJson<FindingPayload>(ctx.userId, "finding.payload", r.payload);
-    return { id: r.id, rule_id: r.rule_id, severity: r.severity, title: p.title, detail: p.detail, remediation: p.remediation };
+    return { id: r.id, rule_id: r.rule_id, severity: r.severity, title: p.title, detail: p.detail, remediation: p.remediation, solutions: p.solutions ?? [] };
   });
 }
 
@@ -89,7 +89,7 @@ export async function saveFindings(ctx: Ctx, solutionId: string, findings: Findi
   if (!findings.length) return;
   const { error } = await ctx.db.from("analysis_findings").insert(findings.map((f) => ({
     solution_id: solutionId, rule_id: f.ruleId, severity: f.severity,
-    payload: sealJson(ctx.userId, "finding.payload", { title: f.title, detail: f.detail, remediation: f.remediation ?? null, componentKey: f.componentKey ?? null } satisfies FindingPayload),
+    payload: sealJson(ctx.userId, "finding.payload", { title: f.title, detail: f.detail, remediation: f.remediation ?? null, componentKey: f.componentKey ?? null, solutions: f.solutions ?? [] } satisfies FindingPayload),
   })));
   if (error) throw new Error(error.message);
 }
