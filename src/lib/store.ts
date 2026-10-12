@@ -1,3 +1,4 @@
+import { listConnections } from "./connections";
 import { analyzeSolution } from "./d365/analyzer";
 import type { Finding, ParsedSolution } from "./d365/types";
 import type { Ctx } from "./server/auth";
@@ -19,7 +20,7 @@ const metaOf = (p: ParsedSolution, fileName: string): SolutionMeta => ({
   publisherName: p.publisher?.uniqueName ?? null, publisherPrefix: p.publisher?.customizationPrefix ?? null, fileName,
 });
 
-export async function logChange(ctx: Ctx, action: "upload" | "analyze" | "compare" | "delete" | "purge", entity: string, entityId: string | null, summary: string) {
+export async function logChange(ctx: Ctx, action: "upload" | "analyze" | "compare" | "delete" | "purge" | "connect" | "verify", entity: string, entityId: string | null, summary: string) {
   await ctx.db.from("change_log").insert({ action, entity, entity_id: entityId, summary: sealJson(ctx.userId, "log.summary", summary), app_version: APP_VERSION });
 }
 
@@ -122,17 +123,18 @@ export async function deleteSolution(ctx: Ctx, id: string) {
 
 /** Erase everything this user has stored (right to erasure). Leaves one sealed audit record of the purge itself. */
 export async function purgeAll(ctx: Ctx) {
-  for (const t of ["comparisons", "analysis_findings", "solutions", "change_log"]) {
+  for (const t of ["comparisons", "analysis_findings", "solutions", "d365_connections", "change_log"]) {
     const { error } = await ctx.db.from(t).delete().eq("owner_id", ctx.userId);
     if (error) throw new Error(error.message);
   }
-  await logChange(ctx, "purge", "account", null, "All stored solutions, findings, comparisons and history were deleted by the user");
+  await logChange(ctx, "purge", "account", null, "All stored solutions, findings, comparisons, saved connections and history were deleted by the user");
 }
 
 /** Right of access / portability: everything stored for this user, decrypted, as one JSON document. */
 export async function exportAll(ctx: Ctx) {
   const unseal = <T,>(purpose: string, v: string): T | null => { try { return unsealJson<T>(ctx.userId, purpose, v); } catch (e) { if (e instanceof DecryptionError) return null; throw e; } };
-  const [sol, fnd, cmp, lg] = await Promise.all([
+  const [con, sol, fnd, cmp, lg] = await Promise.all([
+    listConnections(ctx).catch(() => ({ connections: [] })),
     ctx.db.from("solutions").select("id, meta, parsed, created_at"),
     ctx.db.from("analysis_findings").select("id, solution_id, rule_id, severity, payload, analyzed_at"),
     ctx.db.from("comparisons").select("id, left_solution_id, right_solution_id, result, created_at"),
@@ -144,6 +146,7 @@ export async function exportAll(ctx: Ctx) {
     solutions: (sol.data ?? []).map((r) => ({ id: r.id, createdAt: r.created_at, meta: unseal("solution.meta", r.meta), parsed: unseal("solution.parsed", r.parsed) })),
     findings: (fnd.data ?? []).map((r) => ({ id: r.id, solutionId: r.solution_id, ruleId: r.rule_id, severity: r.severity, analyzedAt: r.analyzed_at, ...(unseal<FindingPayload>("finding.payload", r.payload) ?? {}) })),
     comparisons: (cmp.data ?? []).map((r) => ({ id: r.id, left: r.left_solution_id, right: r.right_solution_id, createdAt: r.created_at, result: unseal("comparison.result", r.result) })),
+    connections: con.connections.map(({ id, name, environmentUrl, tenantId, clientId, createdAt }) => ({ id, name, environmentUrl, tenantId, clientId, createdAt })), // client secrets are never exported
     history: (lg.data ?? []).map((r) => ({ id: r.id, action: r.action, entity: r.entity, entityId: r.entity_id, appVersion: r.app_version, createdAt: r.created_at, summary: unseal<string>("log.summary", r.summary) })),
   };
 }

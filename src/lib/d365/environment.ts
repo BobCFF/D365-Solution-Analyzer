@@ -1,0 +1,42 @@
+/**
+ * Validation for a saved Dynamics 365 connection (shared by the form and, authoritatively, the server).
+ * Only Microsoft-hosted Dataverse hosts are accepted, so a saved connection can never point this server at an
+ * arbitrary URL (SSRF guard), and credentials can only ever be sent to Microsoft Entra.
+ */
+const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const HOST = /^[a-z0-9][a-z0-9-]{0,62}\.crm\d{0,2}\.(dynamics\.com|dynamics\.cn|microsoftdynamics\.us|appsplatform\.us)$/;
+
+export interface ConnectionInput { name: string; environmentUrl: string; tenantId: string; clientId: string; clientSecret: string }
+
+/** "https://org.crm4.dynamics.com/main.aspx" -> "https://org.crm4.dynamics.com"; throws a user-readable Error otherwise. */
+export function normalizeEnvironmentUrl(raw: string): string {
+  let u: URL;
+  try { u = new URL(raw.trim()); } catch { throw new Error("Enter the environment URL, e.g. https://yourorg.crm.dynamics.com"); }
+  if (u.protocol !== "https:") throw new Error("The environment URL must start with https://");
+  if (u.username || u.password || u.port) throw new Error("The environment URL must not contain credentials or a port.");
+  if (!HOST.test(u.hostname)) throw new Error("That is not a Dataverse environment URL. It should look like https://yourorg.crm.dynamics.com (regional hosts such as .crm4.dynamics.com are fine).");
+  return u.origin;
+}
+
+/** Microsoft Entra sign-in host for the environment's cloud. */
+export function authorityHost(environmentOrigin: string): string {
+  const host = new URL(environmentOrigin).hostname;
+  if (host.endsWith(".dynamics.cn")) return "login.partner.microsoftonline.cn";
+  if (host.endsWith(".microsoftdynamics.us") || host.endsWith(".appsplatform.us")) return "login.microsoftonline.us";
+  return "login.microsoftonline.com";
+}
+
+export function validateConnectionInput(raw: unknown): ConnectionInput {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const str = (k: string) => (typeof r[k] === "string" ? (r[k] as string).trim() : "");
+  const name = str("name");
+  if (!name || name.length > 80) throw new Error("Give the connection a name (up to 80 characters).");
+  const environmentUrl = normalizeEnvironmentUrl(str("environmentUrl"));
+  const tenantId = str("tenantId");
+  if (!GUID.test(tenantId) && !/^[A-Za-z0-9][A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,}$/.test(tenantId)) throw new Error("Tenant ID must be the directory (tenant) GUID or a domain such as contoso.onmicrosoft.com.");
+  const clientId = str("clientId");
+  if (!GUID.test(clientId)) throw new Error("Client ID must be the application (client) ID GUID of your app registration.");
+  const clientSecret = str("clientSecret");
+  if (clientSecret.length < 8 || clientSecret.length > 256) throw new Error("Paste the client secret VALUE (not the secret ID).");
+  return { name, environmentUrl, tenantId, clientId, clientSecret };
+}

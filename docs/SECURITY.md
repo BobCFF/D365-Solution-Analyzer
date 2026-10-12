@@ -19,6 +19,12 @@ Solution files describe a customer's data model, security roles, integrations an
 | Error leakage | API errors are generic; details go to server logs only (never include customer data in logs). |
 | Right to erasure | Settings: **Change log > Delete all my data** (`DELETE /api/account`) removes every row the user owns. |
 
+## Dynamics 365 connections (v0.12.0)
+- Service-principal secrets are the most sensitive thing the app holds. They are sealed like everything else (AAD-bound to the user and column), exist in plaintext only inside the server routes that sign in, and are excluded from API responses, logs, errors and the data export.
+- Use a dedicated Entra app registration per environment, grant its application user a **read-only** custom security role, and rotate the secret regularly. The app only ever sends GET requests (and the token request to Microsoft Entra).
+- SSRF/credential-exfiltration guard: only `https://<org>.crm[N].dynamics.com|.dynamics.cn|.microsoftdynamics.us|.appsplatform.us` hosts are accepted (validated on save and on every call); the sign-in authority is derived from that cloud, never user-supplied; redirects are not followed; `@odata.nextLink` is followed only inside the same environment; query values are validated against an allow-list pattern and quote-escaped.
+- Rate limits: 10 tests/min, 6 verifications/min and 60/hour per user; at most 10 saved connections.
+
 ## What is *not* encrypted (by design)
 Row ids, owner id, timestamps, finding rule id + severity (e.g. `DEP101`, `error`), audit action type, app version, and row counts. These identify no customer component.
 

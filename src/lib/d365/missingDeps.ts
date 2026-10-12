@@ -29,6 +29,8 @@ export interface MissingRow {
   status: "missing" | "verify";
   severity: "error" | "warning" | "info";
   requiredType: string;
+  /** numeric component type code when known (used to look the component up in a real environment) */
+  requiredTypeCode?: number;
   requiredName: string;
   requiredKey?: string;
   requiredParent?: string;
@@ -40,6 +42,8 @@ export interface MissingRow {
   relation?: string;
   /** manifest rows: is the required solution loaded in this workspace? */
   availability: "loaded" | "not-loaded" | "unknown";
+  /** result of checking this component against a connected Dynamics 365 environment (see targetCheck.ts) */
+  target?: { state: "present" | "absent" | "unchecked"; note?: string };
   fix: string;
 }
 
@@ -60,7 +64,7 @@ export function buildMissingRows(sol: ParsedSolution, resolved: ResolvedRef[] | 
     const isLoaded = name ? loaded.has(name.toLowerCase()) : false;
     rows.push({
       id: `m${i}`, source: "manifest", status: "missing", severity: "error",
-      requiredType: typeLabel(m.requiredType), requiredName: m.requiredName, requiredKey: m.requiredKey, requiredParent: m.requiredParent,
+      requiredType: typeLabel(m.requiredType), requiredTypeCode: m.requiredType !== "" && Number.isInteger(Number(m.requiredType)) ? Number(m.requiredType) : undefined, requiredName: m.requiredName, requiredKey: m.requiredKey, requiredParent: m.requiredParent,
       requiredSolution: name || undefined, requiredSolutionVersion: version || undefined,
       dependentType: typeLabel(m.dependentType), dependentName: m.dependentName,
       availability: !name ? "unknown" : loadedSolutions === null ? "unknown" : isLoaded ? "loaded" : "not-loaded",
@@ -80,7 +84,7 @@ export function buildMissingRows(sol: ParsedSolution, resolved: ResolvedRef[] | 
     const soft = r.ref.to.type === 9001 || r.ref.to.type === 380;
     rows.push({
       id: `s${i}`, source: "scan", status: verify ? "verify" : "missing", severity: verify ? "info" : soft ? "warning" : "error",
-      requiredType: reqType, requiredName: r.ref.to.key, requiredKey: r.ref.to.key,
+      requiredType: reqType, requiredTypeCode: r.ref.to.type, requiredName: r.ref.to.key, requiredKey: r.ref.to.key,
       dependentType: componentTypeName(r.ref.from.type), dependentName: r.ref.from.name || r.ref.from.key, where: r.ref.detail, relation: KIND_LABEL[r.ref.kind] ?? r.ref.kind,
       availability: "unknown",
       fix: verify
