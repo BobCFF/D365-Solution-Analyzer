@@ -1,4 +1,5 @@
 import { authorityHost, normalizeEnvironmentUrl, type ConnectionInput } from "../d365/environment";
+import { buildClientAssertion } from "./certificate";
 import type { TargetItem, TargetResult, TargetState } from "../d365/targetCheck";
 import { MAX_TARGETS, targetId } from "../d365/targetCheck";
 import { log } from "./log";
@@ -9,7 +10,7 @@ import { log } from "./log";
  * is re-validated on every use; redirects are never followed; responses are never stored by this module.
  */
 export type Fetch = typeof fetch;
-export type DvConfig = Pick<ConnectionInput, "environmentUrl" | "tenantId" | "clientId" | "clientSecret">;
+export type DvConfig = Pick<ConnectionInput, "environmentUrl" | "tenantId" | "clientId" | "authType" | "clientSecret" | "privateKeyPem" | "certificatePem">;
 
 /** Message is safe to show the user (never contains the secret or a token). */
 export class DataverseError extends Error {
@@ -23,19 +24,29 @@ const AAD_HINTS: Record<string, string> = {
   AADSTS7000222: "The client secret has expired. Create a new secret and save the connection again.",
   AADSTS700016: "The application (client) ID was not found in that tenant. Check the client ID and tenant ID.",
   AADSTS90002: "The tenant was not found. Check the tenant ID.",
-  AADSTS700027: "The client assertion or secret is invalid for this application.",
+  AADSTS700027: "Microsoft Entra could not verify the certificate. Upload the public certificate (.cer) of this connection to the app registration (Certificates & secrets > Certificates) and wait a minute.",
+  AADSTS700024: "The sign-in assertion was rejected as expired. Check that this server's clock is correct, then try again.",
+  AADSTS1002016: "Microsoft Entra rejected the certificate algorithm. Delete and re-add the connection to generate a new certificate.",
   AADSTS500011: "The environment URL was not recognised as a resource in this tenant. Check the environment URL.",
 };
 
 export async function getAccessToken(cfg: DvConfig, f: Fetch = fetch): Promise<string> {
   const origin = normalizeEnvironmentUrl(cfg.environmentUrl);
   const url = `https://${authorityHost(origin)}/${encodeURIComponent(cfg.tenantId)}/oauth2/v2.0/token`;
+  let credential: Record<string, string>;
+  if (cfg.authType === "certificate") {
+    if (!cfg.privateKeyPem || !cfg.certificatePem) throw new DataverseError("This connection has no certificate. Delete it and add it again.", 400);
+    credential = { client_assertion_type: "urn:ietf:params:oauth:client-assertion-type:jwt-bearer", client_assertion: buildClientAssertion({ clientId: cfg.clientId, audience: url, privateKeyPem: cfg.privateKeyPem, certificatePem: cfg.certificatePem }) };
+  } else {
+    if (!cfg.clientSecret) throw new DataverseError("This connection has no client secret. Delete it and add it again.", 400);
+    credential = { client_secret: cfg.clientSecret };
+  }
   let res: Response;
   try {
     res = await f(url, {
       method: "POST", redirect: "manual", signal: AbortSignal.timeout(TIMEOUT_MS),
       headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
-      body: new URLSearchParams({ grant_type: "client_credentials", client_id: cfg.clientId, client_secret: cfg.clientSecret, scope: `${origin}/.default` }),
+      body: new URLSearchParams({ grant_type: "client_credentials", client_id: cfg.clientId, scope: `${origin}/.default`, ...credential }),
     });
   } catch { throw new DataverseError("Could not reach Microsoft Entra. Try again in a moment."); }
   const body = (await res.json().catch(() => ({}))) as { access_token?: string; error_description?: string };

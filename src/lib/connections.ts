@@ -1,4 +1,5 @@
-import type { ConnectionInput } from "./d365/environment";
+import type { AuthType, ConnectionInput } from "./d365/environment";
+import { inspectCertificate } from "./server/certificate";
 import type { Ctx } from "./server/auth";
 import { DecryptionError, sealJson, unsealJson } from "./server/crypto";
 import { log } from "./server/log";
@@ -6,9 +7,14 @@ import { log } from "./server/log";
 /** Saved Dynamics 365 connections. The whole config (including the client secret) is one sealed value. */
 const PURPOSE = "connection.config";
 export const MAX_CONNECTIONS = 10;
-export interface ConnectionSummary { id: string; name: string; environmentUrl: string; tenantId: string; clientId: string; createdAt: string }
+export interface ConnectionSummary { id: string; name: string; environmentUrl: string; tenantId: string; clientId: string; createdAt: string; authType: AuthType; certThumbprint?: string; certExpires?: string }
 
-const summary = (id: string, createdAt: string, c: ConnectionInput): ConnectionSummary => ({ id, name: c.name, environmentUrl: c.environmentUrl, tenantId: c.tenantId, clientId: c.clientId, createdAt });
+const summary = (id: string, createdAt: string, c: ConnectionInput): ConnectionSummary => {
+  const base = { id, name: c.name, environmentUrl: c.environmentUrl, tenantId: c.tenantId, clientId: c.clientId, createdAt };
+  if (c.authType !== "certificate" || !c.certificatePem) return { ...base, authType: "secret" };
+  const i = inspectCertificate(c.certificatePem);
+  return { ...base, authType: "certificate", certThumbprint: i.thumbprint, certExpires: i.expiresAt };
+};
 
 /** Never returns the secret. Rows that cannot be decrypted are counted, not fatal. */
 export async function listConnections(ctx: Ctx): Promise<{ connections: ConnectionSummary[]; unreadable: number }> {
