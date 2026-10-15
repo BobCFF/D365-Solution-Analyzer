@@ -18,6 +18,7 @@ Requests carry the user's Supabase JWT (`Authorization: Bearer`); `clientForRequ
 | Types / component-type codes / version math | `types.ts`, `componentTypes.ts`, `version.ts` |
 | Rules (package, publisher, deps, patches, layering, tables, security) | `analyzer.ts` |
 | Dependency graph, resolver, transitive requirements, import-order planner | `dependencies.ts` |
+| Security role comparison (pure diff + UI) | `src/lib/d365/roleCompare.ts`, `src/components/roleCompare.tsx` |
 | Site map / app parsing | `navigation.ts` |
 | Cloud flow model, layout, diff | `flow.ts`, `flowLayout.ts` |
 | Compare: facets, status, deploy readiness; tree/filters | `comparison.ts`, `compareTree.ts` |

@@ -26,6 +26,7 @@ Legend: P0 first, P1 important, P2 nice-to-have.
 - [ ] Compare: saved comparisons, column filters/menus, virtualized rows, 3-way (base) compare, side-by-side XML diff.
 
 ## P2
+- [ ] Roles: compare field security profiles the same way; show miscellaneous (non-table) privileges and role inheritance; compare against a role in a connected environment.
 - [ ] Environments: rotate a certificate in place (generate a new one for an existing connection); bring-your-own certificate; interactive (delegated) sign-in or managed identity / federated credentials; verify more types (option sets, relationships, security role privileges); compare a solution's version/layering against the target's installed solution; PGlite RLS tests for `d365_connections`.
 - [ ] Optional cross-device sync of the saved view (sealed, per user) instead of per-browser storage; remember scroll position.
 - [ ] ERD view of a loaded solution (deep-link into D365 ERD Builder or embed).
@@ -34,6 +35,7 @@ Legend: P0 first, P1 important, P2 nice-to-have.
 - [ ] Accessibility pass (focus trap in dialogs, table semantics).
 
 ## Done
+- [x] 0.14.0 Compare two security roles (table privileges, across solutions).
 - [x] 0.13.0 Certificate sign-in for Dynamics 365 connections (server-generated key pair, private key never leaves the server).
 - [x] 0.12.0 Saved Dynamics 365 connections (service principal) and read-only verification of missing dependencies against a real environment.
 - [x] 0.11.0 App-wide progress dialog for every request and long job.
