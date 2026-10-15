@@ -254,3 +254,7 @@ dialog.prog{max-width:420px;text-align:left}
 @keyframes prog-slide{0%{margin-left:-40%}100%{margin-left:100%}}
 .prog-detail{margin:10px 0 0;overflow-wrap:anywhere}.prog-others{margin:8px 0 0;padding-left:18px;font-size:13px}.prog-note{margin:12px 0 0;font-size:12px}
 @media (prefers-reduced-motion:reduce){.prog-bar.indet>div{animation:none;width:100%;opacity:.5}.prog-bar>div{transition:none}}
+
+/* ---- security role comparison ---- */
+.rcmp-pick{align-items:flex-end}.rcmp-side{display:flex;flex-wrap:wrap;gap:6px;align-items:center}.rcmp-side b{min-width:14px}
+.rcmp-diff{display:inline-flex;align-items:center;gap:4px;background:var(--warn-soft);border:1px solid var(--warn);border-radius:8px;padding:1px 4px;white-space:nowrap}

@@ -208,7 +208,7 @@ function DashboardInner({ token, email, onSignOut }: { token: string; email: str
         {tab === "navigation" && parsed && <NavigationView sol={parsed} deps={deps} />}
         {tab === "flows" && parsed && <FlowsView key={selected} sol={parsed} deps={deps} />}
         {tab === "dictionary" && parsed && <DictionaryView sol={parsed} />}
-        {tab === "security" && parsed && <SecurityView key={selected} sol={parsed} />}
+        {tab === "security" && parsed && <SecurityView key={selected} sol={parsed} solutionId={selected} solutions={solutions} load={loadParsed} />}
         {tab === "compare" && <CompareApp solutions={solutions} load={loadParsed} onLogged={logCompare} />}
         {tab === "environments" && <EnvironmentsView connections={connections} available={connectionsOk} api={api} onChanged={refreshConnections} />}
         {tab === "log" && <LogView log={log} version={APP_VERSION} api={api} onPurge={() => setConfirmPurge(true)} onResetView={() => { store.reset(); window.location.reload(); }} />}

@@ -6,6 +6,7 @@ import type { Api } from "@/lib/api-client";
 import { errMsg } from "@/lib/api-client";
 import { categoryOf, filterFindings, isSystemSolution } from "@/lib/d365/findingMeta";
 import { ColumnTable, type TableColumn } from "./ColumnTable";
+import { RoleCompare } from "./roleCompare";
 import type { MissingRow } from "@/lib/d365/missingDeps";
 import type { TargetResult } from "@/lib/d365/targetCheck";
 import { asBool, asOneOf, asString, asStringArray } from "@/lib/uiStateStore";
@@ -245,16 +246,16 @@ const FIELD_COLUMNS: TableColumn<FieldPermRow>[] = [
   { key: "update", label: "Update", filter: "set", get: (r) => (r.update ? "Yes" : "No"), render: (r) => (r.update ? "✓" : "—") },
 ];
 
-interface SecurityPrefs { mode: "roles" | "fields"; role: string; profile: string }
+interface SecurityPrefs { mode: "roles" | "fields" | "compare"; role: string; profile: string }
 const normalizeSecurity = (raw: unknown): SecurityPrefs => {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
-  return { mode: asOneOf(r.mode, ["roles", "fields"] as const, "roles"), role: asString(r.role), profile: asString(r.profile) };
+  return { mode: asOneOf(r.mode, ["roles", "fields", "compare"] as const, "roles"), role: asString(r.role), profile: asString(r.profile) };
 };
 
-export function SecurityView({ sol }: { sol: ParsedSolution }) {
+export function SecurityView({ sol, solutionId, solutions, load }: { sol: ParsedSolution; solutionId: string; solutions: { id: string; unique_name: string; version: string }[]; load: (id: string) => Promise<ParsedSolution> }) {
   const roles = sol.roles ?? [], profiles = sol.fieldProfiles ?? [];
   const [prefs, setPrefs] = useSavedState<SecurityPrefs>("security", { mode: "roles", role: "", profile: "" }, normalizeSecurity);
-  const mode = prefs.mode === "roles" && roles.length ? "roles" : prefs.mode === "fields" && profiles.length ? "fields" : roles.length ? "roles" : "fields";
+  const mode = prefs.mode === "compare" ? "compare" : prefs.mode === "roles" && roles.length ? "roles" : prefs.mode === "fields" && profiles.length ? "fields" : roles.length ? "roles" : profiles.length ? "fields" : "compare";
   const role = roles.some((x) => x.name === prefs.role) ? prefs.role : roles[0]?.name ?? "";
   const profile = profiles.some((x) => x.name === prefs.profile) ? prefs.profile : profiles[0]?.name ?? "";
   const r = roles.find((x) => x.name === role), p = profiles.find((x) => x.name === profile);
@@ -262,16 +263,18 @@ export function SecurityView({ sol }: { sol: ParsedSolution }) {
     const ents = new Set((sol.entities ?? []).map((e) => e.logical));
     return r ? Object.entries(r.privileges).map(([table, pv]) => ({ table, known: ents.has(table) || !table.includes("_"), pv })) : [];
   }, [r, sol]);
-  if (!roles.length && !profiles.length) return <div className="panel empty">No security roles or field security profiles in this package.</div>;
   return (<div>
     <div className="toolbar">
       <div className="seg" role="group" aria-label="Security view">
         {roles.length > 0 && <button aria-pressed={mode === "roles"} className={mode === "roles" ? "on" : ""} onClick={() => setPrefs((c) => ({ ...c, mode: "roles" }))}>Table privileges</button>}
         {profiles.length > 0 && <button aria-pressed={mode === "fields"} className={mode === "fields" ? "on" : ""} onClick={() => setPrefs((c) => ({ ...c, mode: "fields" }))}>Field security</button>}
+        <button aria-pressed={mode === "compare"} className={mode === "compare" ? "on" : ""} onClick={() => setPrefs((c) => ({ ...c, mode: "compare" }))}>Compare roles</button>
       </div>
-      {mode === "roles" ? <select value={role} onChange={(e) => setPrefs((c) => ({ ...c, role: e.target.value }))} aria-label="Role">{roles.map((x) => <option key={x.name}>{x.name}</option>)}</select>
+      {mode === "compare" ? null : mode === "roles" ? <select value={role} onChange={(e) => setPrefs((c) => ({ ...c, role: e.target.value }))} aria-label="Role">{roles.map((x) => <option key={x.name}>{x.name}</option>)}</select>
         : <select value={profile} onChange={(e) => setPrefs((c) => ({ ...c, profile: e.target.value }))} aria-label="Profile">{profiles.map((x) => <option key={x.name}>{x.name}</option>)}</select>}
     </div>
+    {mode === "compare" && <RoleCompare currentId={solutionId} current={sol} solutions={solutions} load={load} />}
+    {mode !== "compare" && !roles.length && !profiles.length && <div className="panel empty">No security roles or field security profiles in this package. Use Compare roles to compare roles from other loaded solutions.</div>}
     {mode === "roles" && r && <ColumnTable id="security.roles" rows={privRows} columns={PRIV_COLUMNS} rowKey={(x) => x.table} exportName={`${role}-privileges.csv`} initialSort={{ key: "table", dir: 1 }} />}
     {mode === "fields" && p && <ColumnTable id="security.fields" rows={p.permissions} columns={FIELD_COLUMNS} rowKey={(x) => x.entity + "." + x.attribute} exportName={`${profile}-field-permissions.csv`} />}
   </div>);

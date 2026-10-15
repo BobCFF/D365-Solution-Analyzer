@@ -2,6 +2,10 @@
 
 All notable changes to this project are recorded here. Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/). The app version lives in `package.json` and is stamped on every in-app audit-log entry.
 
+## [0.14.0] - 2026-10-15
+### Added
+- **Compare two security roles.** Security > **Compare roles**: pick role A and role B (from the same solution or from two different loaded solutions) and see every table privilege side by side. Each verb (Create, Read, Write, Delete, Append, Append To, Assign, Share) shows `A → B` access depth (None, User, BU, Deep, Org) with differences highlighted. A summary shows identical / different / only-in-A / only-in-B tables, how many privileges B grants more or less than A, and org-wide privilege counts. By default only differences are listed; the Difference column filter shows identical rows too. Includes the usual column menus, search, saved view, a Swap button and CSV export.
+
 ## [0.13.0] - 2026-10-13
 ### Added
 - **Certificate sign-in for Dynamics 365 connections (recommended).** Choose *Certificate* when adding a connection and the app generates the RSA-2048 key pair and a self-signed certificate itself. The **private key is encrypted straight into the database and never shown, downloaded or sent anywhere**; you only download the public `.cer` and upload it to the app registration (Entra > Certificates & secrets > Certificates). Sign-in uses a signed client assertion (RFC 7523, RS256, `x5t`/`x5t#S256` headers, 10-minute lifetime), so **no client secret exists to leak**.
